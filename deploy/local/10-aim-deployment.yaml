@@ -1,0 +1,67 @@
+# Throwaway local artifact — see 00-namespace.yaml for context.
+#
+# Image: aim-llamacpp-smoketest (built by the local Docker smoke test, see
+# /tmp/.../scratchpad/docker-smoketest/Dockerfile from that session) — a
+# single-stage image, NOT the real 3-layer production pattern
+# (docker/Dockerfile.aim-epyc-base + docker/Dockerfile.aim on top of a
+# compiled-for-EPYC engine image). Sideloaded into the kind node with
+# `kind load docker-image aim-llamacpp-smoketest --name aim-local`, so
+# imagePullPolicy is Never — there is no registry involved.
+#
+# AIM_ID / AIM_ENGINE are already baked into the image as defaults; set
+# explicitly here anyway so the Deployment is self-describing.
+#
+# The image doesn't bake the GGUF in or mount it from the host — it downloads
+# via llama-server's own `-hf` flag at container startup (same as the bare
+# container smoke test), so the pod needs outbound network access to
+# huggingface.co. That's why startupProbe is generous: download + model load
+# can take a couple of minutes depending on network conditions.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aim-llamacpp
+  namespace: aim-demo
+  labels:
+    app: aim-llamacpp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aim-llamacpp
+  template:
+    metadata:
+      labels:
+        app: aim-llamacpp
+    spec:
+      containers:
+        - name: aim-llamacpp
+          image: aim-llamacpp-smoketest
+          imagePullPolicy: Never
+          env:
+            - name: AIM_ID
+              value: "aim-smoketest/llamacpp-tiny"
+            - name: AIM_ENGINE
+              value: "llamacpp"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120  # ~10 min ceiling for GGUF download + model load on a slow link
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15

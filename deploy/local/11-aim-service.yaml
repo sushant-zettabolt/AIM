@@ -1,0 +1,16 @@
+# Throwaway local artifact — see 00-namespace.yaml for context.
+apiVersion: v1
+kind: Service
+metadata:
+  name: aim-llamacpp
+  namespace: aim-demo
+  labels:
+    app: aim-llamacpp
+spec:
+  type: ClusterIP
+  selector:
+    app: aim-llamacpp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

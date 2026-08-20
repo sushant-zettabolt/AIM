@@ -1,0 +1,59 @@
+# Throwaway local artifact — see 00-namespace.yaml for context.
+#
+# OpenWebUI, pointed at the AIM Service by in-cluster DNS
+# (<service>.<namespace>.svc.cluster.local). This is the thing being
+# proven: pod-to-pod DNS resolution + routing to the AIM Service, not just
+# that each pod works standalone.
+#
+# Env vars verified against docs.openwebui.com/reference/env-configuration/
+# rather than assumed:
+#   - OPENAI_API_BASE_URL: singular form, default "https://api.openai.com/v1"
+#     in upstream docs — pointed at the in-cluster AIM Service instead.
+#   - OPENAI_API_KEY: llama-server doesn't require one (see its own startup
+#     log: "no API key is set") — a dummy value satisfies OpenWebUI's client,
+#     which expects some non-empty key to be present.
+#   - WEBUI_AUTH=False: disables the login wall for this smoke test only.
+#
+# Same sideload approach as the AIM image — `docker pull` +
+# `kind load docker-image` — so imagePullPolicy is Never here too.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: aim-demo
+  labels:
+    app: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+    spec:
+      containers:
+        - name: openwebui
+          image: ghcr.io/open-webui/open-webui:main
+          imagePullPolicy: Never
+          env:
+            - name: OPENAI_API_BASE_URL
+              value: "http://aim-llamacpp.aim-demo.svc.cluster.local:8000/v1"
+            - name: OPENAI_API_KEY
+              value: "sk-local-smoketest-dummy"
+            - name: WEBUI_AUTH
+              value: "False"
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30

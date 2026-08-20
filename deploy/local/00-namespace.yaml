@@ -1,0 +1,13 @@
+# Throwaway local artifacts — kind-on-laptop smoke test only.
+#
+# Proves pod-to-pod wiring (UI -> AIM Service -> llama-server) on a local
+# Kubernetes cluster. Explicitly NOT production manifests: no registry, no
+# EPYC/multi-arch, no resource tuning, no ingress/TLS/auth, not the org's
+# Helm charts. See LLAMACPP_LOCAL_MVP_PLAN.md for the container-level
+# smoke test this builds on, and LLAMACPP_FULL_PROJECT_CHANGES.md for what
+# a real EPYC/production deployment still needs.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aim-demo

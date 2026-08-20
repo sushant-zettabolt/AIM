@@ -1,0 +1,16 @@
+# Throwaway local artifact — see 00-namespace.yaml for context.
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+  namespace: aim-demo
+  labels:
+    app: openwebui
+spec:
+  type: ClusterIP
+  selector:
+    app: openwebui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
