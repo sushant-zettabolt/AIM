@@ -12,7 +12,14 @@
 #   - OPENAI_API_KEY: llama-server doesn't require one (see its own startup
 #     log: "no API key is set") — a dummy value satisfies OpenWebUI's client,
 #     which expects some non-empty key to be present.
-#   - WEBUI_AUTH=False: disables the login wall for this smoke test only.
+#
+# Originally also set WEBUI_AUTH=False to skip the login wall for this
+# smoke test, but OpenWebUI refuses that once any user exists in its DB
+# ("You can't turn off authentication because there are existing users") —
+# hit this after creating a throwaway account via the signup API during
+# verification. Dropped the env var; normal sign-in works fine with an
+# existing account (or sign up a new one — ENABLE_SIGNUP is unrelated to
+# WEBUI_AUTH and defaults to on).
 #
 # Same sideload approach as the AIM image — `docker pull` +
 # `kind load docker-image` — so imagePullPolicy is Never here too.
@@ -42,8 +49,6 @@ spec:
               value: "http://aim-llamacpp.aim-demo.svc.cluster.local:8000/v1"
             - name: OPENAI_API_KEY
               value: "sk-local-smoketest-dummy"
-            - name: WEBUI_AUTH
-              value: "False"
           ports:
             - name: http
               containerPort: 8080
