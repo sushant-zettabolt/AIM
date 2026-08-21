@@ -1,5 +1,32 @@
 # Standalone Docker on the real EPYC box — notes
 
+## No root on this machine → rootless Docker via `setup.sh`
+
+`setup.sh` installs Docker Engine from the official static binary tarballs
+(`docker-*.tgz` + `docker-rootless-extras-*.tgz`) in rootless mode, entirely
+under `$HOME` — no `sudo` anywhere in the script. Two things it genuinely
+cannot do without root, checked up front rather than failing mid-download:
+
+1. `newuidmap`/`newgidmap` (the `uidmap` package) must already be installed.
+2. Your user needs a range in `/etc/subuid` and `/etc/subgid`.
+
+Many distros/cloud images set both up automatically per-user at account
+creation — if so, the script needs zero root involvement and just works. If
+not, it prints the exact one-time commands for whoever has root, and stops
+rather than guessing around it.
+
+```bash
+./deploy/epyc-standalone/setup.sh
+# then open a new shell (or `source ~/.bashrc`) so PATH/DOCKER_HOST stick
+./deploy/epyc-standalone/run.sh
+```
+
+Rootless mode has one real-world caveat worth knowing about, not just a
+theoretical one: the storage driver defaults to `vfs` (slower, more disk
+use per layer) unless `fuse-overlayfs` happens to be present on the box,
+since overlayfs itself needs root. Fine for a one-off build/run like this;
+would matter more for repeated rebuilds.
+
 ## Getting the repo onto the new machine
 
 ```bash
