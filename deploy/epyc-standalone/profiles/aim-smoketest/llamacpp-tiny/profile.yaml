@@ -1,0 +1,29 @@
+aim_id: aim-smoketest/llamacpp-tiny
+model_id: aim-smoketest/llamacpp-tiny
+metadata:
+  engine: llamacpp
+  accelerator_type: cpu
+  accelerator_model: CPU
+  accelerator_count: 0
+  # Q8_0, not fp16: per docs/backend/ZenDNN.md, ZenDNN only accelerates
+  # FP32, BF16, and Q8_0 matmuls. The laptop smoke test used the fp16 GGUF
+  # (the only non-BF16 full-precision file the official repo ships), which
+  # would NOT hit the ZenDNN path at all even with GGML_ZENDNN=ON — it'd
+  # silently fall back to plain CPU. Q8_0 is also the one accelerated path
+  # that doesn't depend on Zen4/5-only BF16 hardware support, so it's the
+  # safer first real-hardware test regardless of exact EPYC generation.
+  precision: int8
+  variant: q8-0
+  metric: latency
+  manual_selection_only: false
+  type: unoptimized
+engine_args:
+  hf-repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+  hf-file: "qwen2.5-0.5b-instruct-q8_0.gguf"
+  host: "0.0.0.0"
+  ctx-size: 4096
+  # threads intentionally omitted — llama-server defaults to
+  # hardware_concurrency() when unset, which picks up all 32 cores without
+  # hardcoding a number that'd need editing if this ever moves to a
+  # different-core-count box.
+env_vars: {}
