@@ -19,20 +19,28 @@ global:
   platform: epyc
 
 # OpenWebUI's own ephemeral storage. Upstream default storageClassName
-# (mlstorage) doesn't exist on this cluster; "standard" (rancher.io/local-path)
-# is the real default StorageClass here — confirmed via `kubectl get sc`.
+# (mlstorage) doesn't exist on this cluster, and we deliberately don't assume
+# any specific StorageClass exists at all (kind's "standard" is kind-specific;
+# a bare kubeadm cluster ships no default StorageClass). Leaving this null
+# uses the chart's own built-in fallback (templates/_helpers.tpl:84-103) to
+# emptyDir instead of a PVC — no template changes needed, and it works
+# identically on any single-node cluster. Tradeoff: emptyDir doesn't survive
+# a pod restart, so the GGUF model re-downloads from HF on next start.
 storage:
   ephemeral:
-    storageClassName: standard
+    storageClassName: null
 
 llm:
   # Built via the real 3-layer pattern: assets/epyc/engines/llamacpp/image/Dockerfile
   # (Layer 1: llama-server, generic CPU build) -> docker/Dockerfile.aim-epyc-base
   # (Layer 2, built against assets/epyc/base/llamacpp/) -> docker/Dockerfile.aim
-  # (Layer 3, assets/epyc/aim-smoketest/llamacpp-tiny/). Pushed public to Docker
-  # Hub for this smoke test. Canonical name per get_model_image_name('epyc',
-  # 'aim-smoketest-llamacpp-tiny', 'llamacpp') in src/aim_utils/image_naming.py
-  # -- substitute CHANGEME with the actual Docker Hub username it got pushed to.
+  # (Layer 3, assets/epyc/aim-smoketest/llamacpp-tiny/). All three layers
+  # pushed public to Docker Hub -- Layer 3 built by actually pulling Layer 2
+  # from the registry (not a local tag), which in turn pulled Layer 1 from
+  # the registry, matching how the real vLLM pattern's layers are genuinely
+  # separate, independently-pullable images. Canonical name per
+  # get_model_image_name('epyc', 'aim-smoketest-llamacpp-tiny', 'llamacpp')
+  # in src/aim_utils/image_naming.py.
   image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.1.0"
 
   gpus: 0
@@ -46,7 +54,7 @@ llm:
 
   storage:
     ephemeral:
-      storageClassName: standard
+      storageClassName: null
 
   env_vars:
     # platformDefaults.epyc.env_vars (aimchart-llm's own values.yaml) sets

@@ -97,9 +97,9 @@ limits:
         storageClassName: {{ .Values.storage.ephemeral.storageClassName }}
   name: ephemeral-storage
 {{- else }}
-- emptyDir: {}
+- emptyDir:
+    sizeLimit: {{ .Values.storage.ephemeral.quantity }}
   name: ephemeral-storage
-  sizeLimit: {{ .Values.storage.ephemeral.quantity }}
 {{- end }}
 - emptyDir:
     medium: Memory
