@@ -1,0 +1,28 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+aim_id: aim-smoketest/llamacpp-tiny
+model_id: aim-smoketest/llamacpp-tiny
+metadata:
+  engine: llamacpp
+  accelerator_type: cpu
+  accelerator_model: CPU
+  accelerator_count: 0
+  precision: int8
+  variant: q8-0
+  metric: latency
+  manual_selection_only: false
+  type: unoptimized
+engine_args:
+  hf-repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+  hf-file: "qwen2.5-0.5b-instruct-q8_0.gguf"
+  host: "0.0.0.0"
+  ctx-size: 8192
+  # threads set explicitly (unlike the standalone smoke test's profile) since
+  # this deploys under a K8s cpu request/limit — llama-server's
+  # hardware_concurrency() default would see the host's full core count, not
+  # the cgroup's actual quota, and oversubscribe. Match the Deployment's cpu
+  # request/limit in the values override.
+  threads: 4
+env_vars: {}

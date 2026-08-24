@@ -1,0 +1,72 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Overrides for deploying our llama.cpp-backed AIM image instead of this
+# chart's default vLLM-based epyc image. Deliberately values-only — no
+# template changes anywhere in this chart or in the aimchart-llm dependency
+# (both are already engine-agnostic: aimchart-llm just runs whatever `image:`
+# it's given, sized off gpus/cpus/memory, with imagePullPolicy: Always —
+# see aimchart-llm/templates/deployment.yml).
+#
+# Usage:
+#   helm dependency build .
+#   helm template <release-name> . \
+#     -f values.yaml -f values.epyc-llamacpp.yaml \
+#     | kubectl apply -f - -n <namespace>
+
+global:
+  platform: epyc
+
+# OpenWebUI's own ephemeral storage. Upstream default storageClassName
+# (mlstorage) doesn't exist on this cluster; "standard" (rancher.io/local-path)
+# is the real default StorageClass here — confirmed via `kubectl get sc`.
+storage:
+  ephemeral:
+    storageClassName: standard
+
+llm:
+  # Built via the real 3-layer pattern: assets/epyc/engines/llamacpp/image/Dockerfile
+  # (Layer 1: llama-server, generic CPU build) -> docker/Dockerfile.aim-epyc-base
+  # (Layer 2, built against assets/epyc/base/llamacpp/) -> docker/Dockerfile.aim
+  # (Layer 3, assets/epyc/aim-smoketest/llamacpp-tiny/). Pushed public to Docker
+  # Hub for this smoke test. Canonical name per get_model_image_name('epyc',
+  # 'aim-smoketest-llamacpp-tiny', 'llamacpp') in src/aim_utils/image_naming.py
+  # -- substitute CHANGEME with the actual Docker Hub username it got pushed to.
+  image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.1.0"
+
+  gpus: 0
+  # Tiny 0.5B model (see the profile's engine_args) -- deliberately light vs.
+  # the 10-core reservation used for the earlier vLLM/8B-class smoke test.
+  # Keep threads (profile's engine_args.threads, currently 4) in sync with
+  # this if you change it -- llama-server doesn't see the cgroup quota on
+  # its own.
+  cpus: 4
+  memory: 4
+
+  storage:
+    ephemeral:
+      storageClassName: standard
+
+  env_vars:
+    # platformDefaults.epyc.env_vars (aimchart-llm's own values.yaml) sets
+    # AIM_PRECISION: "bf16" for the vLLM default image -- env_vars deep-merges
+    # (mergeOverwrite in aimchart-llm's _main.tpl), so it survives into this
+    # override unless explicitly overwritten here. Left as bf16, it would fail
+    # profile_selector.py's precision-compatibility check (:464-469) against
+    # our profile's precision: int8 and the deployment would never come up.
+    AIM_PRECISION: "int8"
+    # Required, not optional: AIM_ENGINE defaults to "vllm" independently of
+    # which profile ends up selected (src/aim_runtime/config.py:337) -- the
+    # profile's own metadata.engine: llamacpp does NOT get picked up
+    # automatically. Without this the container fails startup with
+    # "No configuration for engine 'vllm' in .../engines.yaml" even though
+    # AIM_ID correctly resolved the one llamacpp profile that exists.
+    # Confirmed by local docker-run reproduction before this was added.
+    AIM_ENGINE: "llamacpp"
+  # AIM_ID is already baked into the image by docker/Dockerfile.aim (ORG/MODEL
+  # build args); combined with AIM_ENGINE above, no AIM_ENGINE_ARGS override
+  # is needed unless you want to change ctx-size/threads without rebuilding
+  # the image, e.g.:
+  # env_vars:
+  #   AIM_ENGINE_ARGS: '{"ctx-size": 4096, "threads": 2}'

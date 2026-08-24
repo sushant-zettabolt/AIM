@@ -1,0 +1,8 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Helm dependency-build artifacts -- regenerate with `helm dependency build .`
+# Matches solution-blueprints' own .gitignore convention for this chart.
+charts/*.tgz
+Chart.lock

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # target_id to this set. Otherwise it defaults to "vLLM" and will silently run the
 # generic vLLM smoke test (and fail). Remove this set once an engine-agnostic,
 # harness-based base smoke test exists — see docs/plans/engine-agnostic-base-validation.md.
-NON_VLLM_BASE_TARGET_IDS: frozenset[str] = frozenset({"bentoml", "mit-boltz2", "openfold-openfold3"})
+NON_VLLM_BASE_TARGET_IDS: frozenset[str] = frozenset({"bentoml", "mit-boltz2", "openfold-openfold3", "llamacpp"})
 
 
 class BaseImageConfig(BaseModel):

@@ -1,0 +1,105 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Default values for llm-chat.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+metadata:
+  labels: {}
+
+image: "ghcr.io/open-webui/open-webui:v0.9.6"
+imagePullPolicy: Always
+
+env_vars:
+  #OPENAI_API_BASE_URLS: ""
+  ANONYMIZED_TELEMETRY: "false"
+  DO_NOT_TRACK: "true"
+  ENABLE_OLLAMA_API: "false"
+  ENABLE_OPENAI_API: "true"
+  ENABLE_SIGNUP: "false"
+  SCARF_NO_ANALYTICS: "true"
+  WEBUI_AUTH: "false"
+  # Arena suppression
+  ENABLE_EVALUATION_ARENA_MODELS: "false"
+  ENABLE_PERSISTENT_CONFIG: "false"
+storage:
+  ephemeral:
+    quantity: 20Gi
+    storageClassName: mlstorage
+    accessModes:
+      - ReadWriteOnce
+  dshm:
+    sizeLimit: 32Gi
+
+deployment:
+  ports:
+    http: 8080
+
+# startupProbe - checks if the container has successfully started. It disables liveness and readiness probes until it succeeds, useful for slow-starting applications.
+# livenessProbe - checks if the container is still alive. If it fails, Kubernetes restarts the container to recover from failure.
+# readinessProbe - checks if the container is ready to serve traffic. If it fails, the container is removed from the service's endpoints but remains running.
+# ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+# ref: https://github.com/open-webui/helm-charts/blob/main/charts/open-webui/values.yaml
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 5
+  failureThreshold: 20
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  failureThreshold: 1
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /health/db
+    port: http
+  failureThreshold: 1
+  periodSeconds: 10
+
+entrypoint: |
+  bash start.sh
+
+# kaiwo settings (if enabled, use kaiwo CRDs to have kaiwo operator manage the workload)
+kaiwo:
+  enabled: false
+
+http_route:
+  enabled: false
+  gateway:
+    name: https
+    namespace: envoy-gateway-system
+
+global:
+  platform: instinct
+
+llm:
+  storage:
+    ephemeral:
+      storageClassName: mlstorage
+      quantity: 32Gi
+  apiKey: "" # If connecting to an external LLM service, optionally specify an API key
+  apiKeySecretRef: {}
+  # You may alternatively provide an API key that's stored in a Secret called `my-secretname` in the key `api-key` by adding:
+  # apiKeySecretRef:
+  #   name: my-secretname
+  #   key: api-key
+  platformDefaults:
+    instinct:
+      image: "docker.io/amdenterpriseai/aim-meta-llama-llama-3-1-8b-instruct:0.11.1"
+    radeon:
+      image: "docker.io/amdenterpriseai/aim-radeon-qwen-qwen3-vl-8b-instruct:0.12.0-preview"
+    epyc:
+      image: "docker.io/amdenterpriseai/aim-epyc-meta-llama-llama-3-1-8b-instruct:0.13.0"
+      gpus: 0
+      # Fit weights + KV cache + overhead to avoid OOMKilled;
+      memory: 128
+      # cpus=188 keeps the LLM within a single NUMA node (EPYC 9965 = 192 cores/node, SMT off).
+      cpus: 188
+      env_vars:
+        AIM_PRECISION: "bf16"
+        AIM_ALLOW_UNOPTIMIZED: "true"

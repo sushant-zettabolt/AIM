@@ -1,0 +1,14 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Engine definitions for AIM runtime — llama.cpp/EPYC base image.
+#
+# model_arg is intentionally empty: Phase 0 model loading goes through
+# llama-server's own --hf-repo/--hf-file engine_args (see
+# src/aim_runtime/engines/llamacpp.py), not AIM's model-cache resolver, so
+# CommandGenerator must never prepend a -m <path> argument.
+
+llamacpp:
+  launch: llama-server
+  model_arg: ""

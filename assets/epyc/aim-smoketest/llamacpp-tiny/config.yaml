@@ -1,0 +1,13 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Layer 3 config: FROM the Layer 2 llama.cpp/EPYC base
+# (assets/epyc/base/llamacpp/), same as any other model-specific AIM image.
+# Placeholder registry namespace/tag — fill in with wherever Layer 2 actually
+# got pushed (or built and tagged locally for a same-host build chain).
+base_image:
+  base_registry_namespace: stpauljackson3
+  base_repository: aim-epyc-llamacpp-base
+  base_tag: "0.1.0"
+  registry_host: docker.io

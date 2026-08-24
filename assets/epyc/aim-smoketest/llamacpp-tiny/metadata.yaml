@@ -1,0 +1,33 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+org:
+  opencontainers:
+    image:
+      vendor: "AMD"
+      authors: ""
+      licenses: "apache-2.0, MIT, AMD EPYC CONTAINER LICENSE AGREEMENT"
+      description: "Tiny Qwen2.5 GGUF model served via llama.cpp, for smoke-testing the llama.cpp engine end to end."
+      documentation: ""
+      source: "https://github.com/amd-enterprise-ai/aim-build"
+com:
+  amd:
+    aim:
+      model:
+        canonicalName: "aim-smoketest/llamacpp-tiny"
+        tags:
+        - "text-generation"
+        - "chat"
+        - "smoke-test"
+        source: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+        variants:
+        - "aim-smoketest/llamacpp-tiny"
+        publisher: "Qwen"
+      hfToken:
+        required: false
+      release:
+        notes: ""
+      description:
+        full: "Qwen2.5-0.5B-Instruct, Q8_0 GGUF quantization, served through llama-server. Not a production model — exists purely to exercise the llamacpp engine (image build, profile selection, K8s deployment) with a small, fast-downloading model."
+      title: "llama.cpp Smoke Test (Qwen2.5-0.5B)"

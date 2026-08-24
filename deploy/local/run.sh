@@ -24,7 +24,14 @@ dockerc() { sg docker -c "$*"; }
 echo "==> 1. Create the kind cluster (skip if it already exists)"
 if ! kind get clusters | grep -q "^${CLUSTER}\$"; then
   dockerc "docker info --format '{{.MemTotal}} bytes, {{.NCPU}} CPUs'" # sanity check before creating
-  kind create cluster --name "$CLUSTER"
+  # kind/kind-config.yaml sets a 2 (system-reserved) + 2 (kube-reserved) core
+  # split via a kubelet KubeletConfiguration patch, leaving 12 Allocatable
+  # for pods — a node-init-time setting, can't be changed on a running node.
+  # Lives in a subdirectory, not next to the manifests: `kubectl apply -f
+  # "$HERE"` below is non-recursive but still globs every *.yaml directly in
+  # $HERE, and this file isn't a Kubernetes manifest (different API group,
+  # kind.x-k8s.io/v1alpha4) — kubectl correctly rejects it if it's there.
+  kind create cluster --config "$HERE/kind/kind-config.yaml"
 else
   echo "cluster '$CLUSTER' already exists, skipping create"
 fi
