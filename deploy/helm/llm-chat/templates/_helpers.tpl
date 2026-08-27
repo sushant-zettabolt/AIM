@@ -21,6 +21,12 @@
 {{- end -}}
 {{- end -}}
 
+# Model-cache PVC name helper. Stable across `helm upgrade` of the same
+# release, same convention as release.fullname.
+{{- define "pvc.name" -}}
+{{- print (include "release.fullname" .) "-storage" | trunc 63 | trimSuffix "-" }}
+{{- end -}}
+
 # Container resources helper
 {{- define "container.resources" -}}
 requests:
@@ -82,19 +88,8 @@ limits:
 # Container volumes helper
 {{- define "container.volumes" -}}
 {{- if .Values.storage.ephemeral.storageClassName -}}
-- ephemeral:
-    volumeClaimTemplate:
-      spec:
-        {{- if .Values.storage.ephemeral.accessModes }}
-        accessModes: {{ .Values.storage.ephemeral.accessModes }}
-        {{- else }}
-        accessModes:
-          - ReadWriteOnce
-        {{- end }}
-        resources:
-          requests:
-            storage: {{ .Values.storage.ephemeral.quantity }}
-        storageClassName: {{ .Values.storage.ephemeral.storageClassName }}
+- persistentVolumeClaim:
+    claimName: {{ include "pvc.name" . }}
   name: ephemeral-storage
 {{- else }}
 - emptyDir:

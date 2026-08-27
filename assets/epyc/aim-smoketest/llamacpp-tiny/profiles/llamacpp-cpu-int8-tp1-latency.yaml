@@ -2,8 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 
+# aim_id is this profile's catalog identity; model_id is the real HF repo id
+# used for model-cache resolution (must match wherever `aim-runtime
+# download-to-cache` staged the model, i.e. <cache_dir>/Qwen/Qwen2.5-0.5B-Instruct-GGUF/).
+# The two differing is the normal case — same pattern vLLM profiles use.
 aim_id: aim-smoketest/llamacpp-tiny
-model_id: aim-smoketest/llamacpp-tiny
+model_id: Qwen/Qwen2.5-0.5B-Instruct-GGUF
 metadata:
   engine: llamacpp
   accelerator_type: cpu
@@ -15,8 +19,12 @@ metadata:
   manual_selection_only: false
   type: unoptimized
 engine_args:
-  hf-repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
-  hf-file: "qwen2.5-0.5b-instruct-q8_0.gguf"
+  # This HF repo ships several quantizations as sibling .gguf files, so the
+  # single-file glob in LlamaCppEngine.resolve_model_path can't pick one
+  # automatically — gguf_filename names the exact file within the cached
+  # repo directory. Not a real llama-server flag; stripped before the
+  # command line is built.
+  gguf_filename: "qwen2.5-0.5b-instruct-q8_0.gguf"
   host: "0.0.0.0"
   ctx-size: 8192
   # threads set explicitly (unlike the standalone smoke test's profile) since

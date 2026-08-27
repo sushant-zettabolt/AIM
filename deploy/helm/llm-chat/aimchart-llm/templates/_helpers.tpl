@@ -1,0 +1,134 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# create a filled in version of .Values with the platform-specific values
+# .Values.platform takes priority over .Values.global.platform
+{{- define "aimchart-llm.platformValues" -}}
+{{- $global := .Values.global | default dict -}}
+{{- $p := coalesce .Values.platform $global.platform "instinct" -}}
+{{- mergeOverwrite (index .Values.platformDefaults $p | deepCopy) (deepCopy .Values) | toYaml -}}
+{{- end -}}
+
+# Base URL helper
+{{- define "aimchart-llm.httpRoute.baseUrl" -}}
+{{- $projectId := default "project_id" .Values.metadata.project_id -}}
+{{- $userId := default "user_id" .Values.metadata.user_id -}}
+{{- $workloadId := default (include "aimchart-llm.release.fullname" .) .Values.metadata.workload_id -}}
+{{- printf "/%s/%s/%s" $projectId $userId $workloadId }}
+{{- end -}}
+
+# Release name helper
+{{- define "aimchart-llm.release.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+# Release fullname helper
+{{- define "aimchart-llm.release.fullname" -}}
+{{- $currentTime := now | date "20060102-1504" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- if ne .Release.Name "release-name" -}}
+{{- include "aimchart-llm.release.name" . }}-{{ .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- include "aimchart-llm.release.name" . }}-{{ $currentTime | lower | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+# Configmap name helper
+{{- define "aimchart-llm.configmap.name" -}}
+{{- print (include "aimchart-llm.release.fullname" .) "-custom-profiles" | trunc 63 }}
+{{- end -}}
+
+# Model-cache PVC name helper. Stable across `helm upgrade` of the same
+# release (tied to release identity, same as every other named resource in
+# this chart) — a fresh release name gets a fresh PVC, which is the correct
+# Helm-managed-persistence behavior, but a normal upgrade/rollout of an
+# existing release keeps reusing the same claim.
+{{- define "aimchart-llm.pvc.name" -}}
+{{- print (include "aimchart-llm.release.fullname" .) "-model-cache" | trunc 63 | trimSuffix "-" }}
+{{- end -}}
+
+# Container resources helper:
+# 1. if .Values.resources is explicitly defined, use that
+# 2. gpus != 0; set cpu and memory dynamically based on .Values.cpu_per_gpu and .Values.memory_per_gpu.
+# 3. gpus == 0; set cpu and memory from .Values.cpus and .Values.memory.
+{{- define "aimchart-llm.container.resources" -}}
+{{- if .Values.resources -}}
+{{- toYaml .Values.resources -}}
+{{- else -}}
+{{- if .Values.gpus }}
+requests:
+  memory: "{{ max (mul .Values.gpus .Values.memory_per_gpu) 4 }}Gi"
+  cpu: "{{ max (mul .Values.gpus .Values.cpu_per_gpu) 1 }}"
+  amd.com/gpu: "{{ .Values.gpus }}"
+limits:
+  memory: "{{ max (mul .Values.gpus .Values.memory_per_gpu) 4 }}Gi"
+  cpu: "{{ max (mul .Values.gpus .Values.cpu_per_gpu) 1 }}"
+  amd.com/gpu: "{{ .Values.gpus }}"
+{{- else -}}
+requests:
+  memory: "{{ .Values.memory }}Gi"
+  cpu: "{{ .Values.cpus }}"
+limits:
+  memory: "{{ .Values.memory }}Gi"
+  cpu: "{{ .Values.cpus }}"
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+# Container environment variables helper
+{{- define "aimchart-llm.container.env" -}}
+{{- range $key, $value := .Values.env_vars }}
+{{- if (typeIs "string" $value) }}
+- name: {{ $key }}
+  value: {{ $value | quote }}
+{{- else if and $value (kindIs "map" $value) (hasKey $value "name") (hasKey $value "key") }}
+- name: {{ $key }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $value.name }}
+      key: {{ $value.key }}
+{{- else }}
+- name: {{ $key }}
+  value: {{ $value | toString | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+# Container volume mounts helper
+{{- define "aimchart-llm.container.volumeMounts" -}}
+- mountPath: /workload
+  name: ephemeral-storage
+- mountPath: /dev/shm
+  name: dshm
+{{ if .Values.customProfiles -}}
+- mountPath: /workspace/aim-runtime/profiles/custom
+  readOnly: true
+  name: custom-profiles
+{{- end }}
+{{- end -}}
+
+# Container volumes helper
+{{- define "aimchart-llm.container.volumes" -}}
+{{- if .Values.storage.ephemeral.storageClassName -}}
+- persistentVolumeClaim:
+    claimName: {{ include "aimchart-llm.pvc.name" . }}
+  name: ephemeral-storage
+{{- else }}
+- emptyDir:
+    sizeLimit: {{ .Values.storage.ephemeral.quantity }}
+  name: ephemeral-storage
+{{- end }}
+- emptyDir:
+    medium: Memory
+    sizeLimit: {{ .Values.storage.dshm.sizeLimit }}
+  name: dshm
+{{ if .Values.customProfiles -}}
+- name: custom-profiles
+  configMap:
+    name: {{ include "aimchart-llm.configmap.name" . }}
+{{- end }}
+{{- end -}}

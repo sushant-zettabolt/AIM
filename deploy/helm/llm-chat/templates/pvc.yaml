@@ -1,0 +1,33 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# A real, stably-named PVC for OpenWebUI's storage — bound to release
+# identity (see pvc.name), not to any single pod's lifecycle, so it survives
+# a pod replacement (Deployment rollout, node reschedule). Only created when
+# storage.ephemeral.storageClassName is set (falsy uses emptyDir instead,
+# see container.volumes) and a real StorageClass with a dynamic provisioner
+# exists on the cluster.
+
+{{ if .Values.storage.ephemeral.storageClassName -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "pvc.name" . }}
+  labels:
+    app: {{ include "release.fullname" . }}
+    {{- range $key, $value := .Values.metadata.labels }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if .Values.storage.ephemeral.accessModes }}
+  accessModes: {{ .Values.storage.ephemeral.accessModes }}
+  {{- else }}
+  accessModes:
+    - ReadWriteOnce
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.ephemeral.quantity }}
+  storageClassName: {{ .Values.storage.ephemeral.storageClassName }}
+{{- end }}

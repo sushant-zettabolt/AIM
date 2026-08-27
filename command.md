@@ -1,8 +1,9 @@
 # Cluster Command Reference
 
-Operational runbook for the real (kubeadm-based, non-kind, non-k3s) single-node
-Kubernetes cluster this box runs, plus the AIM/llama.cpp + OpenWebUI Helm
-deployment on top of it.
+Operational runbook for the real kubeadm-based single-node Kubernetes
+cluster this box runs, plus the AIM/llama.cpp + OpenWebUI Helm deployment on
+top of it. This is the only supported deployment target — an earlier `kind`
+smoke test existed under `deploy/local/` and has been removed.
 
 Facts specific to this setup, referenced throughout:
 - Node name: `sushant` (control-plane, untainted so it also runs workloads)
@@ -267,7 +268,41 @@ kubectl get nodes
 Confirms `sushant` shows `Ready` before moving on — Flannel takes ~10-30s to
 finish setting up after `apply`.
 
+```bash
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.30/deploy/local-path-storage.yaml
+kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+```
+Installs Rancher's local-path-provisioner (a standard, generic K8s addon —
+nothing kind-specific about it, it works on any real cluster) and marks its
+`local-path` StorageClass as the cluster default. This is a real single-node
+kubeadm cluster with no cloud-provider CSI, so there's no other dynamic
+provisioner available; `local-path` provisions a `hostPath`-backed PV per
+PVC on whichever node the pod lands on — fine for this single-node setup,
+would need a real network-attached provisioner (Ceph, NFS, cloud CSI) on a
+genuine multi-node cluster where pods can be rescheduled to a different
+node than their data. Without this, `values.epyc-llamacpp.yaml`'s
+`storageClassName: local-path` would leave the chart's PVCs (`templates/pvc.yaml`
+in both charts) stuck `Pending` forever with no provisioner to bind them.
+
+```bash
+kubectl get storageclass
+```
+Confirms `local-path` shows up with `(default)` next to it.
+
 ### Deploy the AIM app
+
+**Note:** the llamacpp engine now loads its model through AIM's own model
+cache resolver (`-m <cached-file>`) instead of `llama-server`'s built-in
+HF downloader, and requires the model to already be pre-staged — see
+`CHANGES.md` for why. This is handled automatically: `llm.modelCacheInit`
+(set in `values.epyc-llamacpp.yaml`) runs `./entrypoint.py download-to-cache` in
+an init container before the main container starts, downloading into a real
+PVC (`local-path`-backed, from the step above) rather than the previous
+`emptyDir`/generic-ephemeral-volume choice — so the model now survives a
+full pod replacement (Deployment rollout, node reschedule), not just a
+container-level restart within the same pod. `helm template | kubectl apply`
+below is still the full sequence — no separate manual pre-staging step
+needed.
 
 ```bash
 kubectl create namespace aim-demo-standalone

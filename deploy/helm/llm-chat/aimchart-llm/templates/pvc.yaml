@@ -1,0 +1,46 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# A real, stably-named PVC for the model cache — bound to release identity
+# (see aimchart-llm.pvc.name), not to any single pod's lifecycle. This is
+# what actually lets a pre-staged model (see deployment.yml's
+# modelCacheInit) survive a pod replacement (Deployment rollout, node
+# reschedule), which a generic ephemeral volume (this repo's previous
+# approach) does not — a generic ephemeral volume's PVC is deleted with the
+# pod that owns it. Only created when storage.ephemeral.storageClassName is
+# set (falsy uses emptyDir instead, see container.volumes) and a real
+# StorageClass with a dynamic provisioner exists on the cluster.
+
+{{ define "aimchart-llm.pvc" -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "aimchart-llm.pvc.name" . }}
+  labels:
+    app: {{ include "aimchart-llm.release.fullname" . }}
+    {{- range $key, $value := .Values.metadata.labels }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if .Values.storage.ephemeral.accessModes }}
+  accessModes: {{ .Values.storage.ephemeral.accessModes }}
+  {{- else }}
+  accessModes:
+    - ReadWriteOnce
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.ephemeral.quantity }}
+  storageClassName: {{ .Values.storage.ephemeral.storageClassName }}
+{{- end }}
+
+{{- $pv := include "aimchart-llm.platformValues" . | fromYaml -}}
+{{- $ctx := merge (dict "Values" $pv) (omit . "Values") -}}
+{{- with $ctx -}}
+
+{{ if and (not .Values.existingService) .Values.storage.ephemeral.storageClassName -}}
+{{- include "aimchart-llm.pvc" . }}
+{{- end }}
+
+{{- end -}}

@@ -1,0 +1,13 @@
+# Vendored from the upstream OCI dependency (docker.io/amdenterpriseai,
+# revision below) instead of pulled at `helm dependency build` time, because
+# the llamacpp model-cache init container (see templates/deployment.yml,
+# `modelCacheInit`) needs a template change the upstream chart doesn't
+# expose. Re-sync manually against upstream releases; this won't auto-update.
+annotations:
+  org.opencontainers.image.revision: 4872651d
+  org.opencontainers.image.source: https://github.com/amd-enterprise-ai/solution-blueprints/tree/4872651d/aimcharts/aimchart-llm
+apiVersion: v2
+description: AIM LLM Deployed on Kubernetes
+name: aimchart-llm
+type: application
+version: 0.3.0

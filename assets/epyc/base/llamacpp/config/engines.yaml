@@ -4,11 +4,14 @@
 
 # Engine definitions for AIM runtime — llama.cpp/EPYC base image.
 #
-# model_arg is intentionally empty: Phase 0 model loading goes through
-# llama-server's own --hf-repo/--hf-file engine_args (see
-# src/aim_runtime/engines/llamacpp.py), not AIM's model-cache resolver, so
-# CommandGenerator must never prepend a -m <path> argument.
+# model_arg is -m: model loading goes through AIM's model-cache resolver, the
+# same as vLLM/BentoML (see src/aim_runtime/engines/llamacpp.py). This
+# requires the model to be pre-staged in the AIM cache dir first (e.g. via
+# `./entrypoint.py download-to-cache` as an init step) — llama-server's own
+# --hf-repo/--hf-file downloader is intentionally not used as a runtime
+# fallback, so a model that isn't cached fails fast instead of cold-starting
+# a download on every pod restart.
 
 llamacpp:
   launch: llama-server
-  model_arg: ""
+  model_arg: -m

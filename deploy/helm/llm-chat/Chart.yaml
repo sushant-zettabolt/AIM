@@ -11,9 +11,11 @@ maintainers:
   url: https://www.amd.com/
 version: 0.8.2
 dependencies:
+# Vendored locally (see aimchart-llm/Chart.yaml for why) instead of pulled
+# from the upstream OCI registry at `helm dependency build` time.
 - name: aimchart-llm
   version: 0.3.0
-  repository: oci://registry-1.docker.io/amdenterpriseai
+  repository: file://aimchart-llm
   alias: llm
 annotations:
   org.opencontainers.image.vendor: AMD

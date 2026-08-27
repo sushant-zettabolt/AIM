@@ -37,9 +37,8 @@ cd AIM
 That's it for the Docker path below — the Dockerfile builds everything
 (llama.cpp+ZenDNN, AIM runtime, dependencies) inside the image, so you don't
 need a local Python venv on this machine unless you also want to run
-`entrypoint.py` bare (outside Docker) like the laptop test did — if so, see
-`LLAMACPP_LOCAL_MVP_PLAN.md`'s Phase 0 steps, same idea, just `pip install -e
-".[epyc]"` instead of `.[cpu]`/nothing.
+`entrypoint.py` bare (outside Docker) like the laptop test did — same idea,
+just `pip install -e ".[epyc]"` instead of `.[cpu]`/nothing.
 
 ## What changed from the laptop smoke test
 

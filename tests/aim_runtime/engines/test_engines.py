@@ -22,6 +22,8 @@ from aim_runtime.engines import (
     BentomlEngine,
     BentomlEngineArgsModel,
     EngineArgsFormat,
+    LlamaCppEngine,
+    LlamaCppEngineArgsModel,
     VllmEngine,
     VllmEngineArgsModel,
     VllmOmniEngine,
@@ -46,6 +48,7 @@ class TestFactory:
             (Engine.VLLM, VllmEngine),
             (Engine.VLLM_OMNI, VllmOmniEngine),
             (Engine.BENTOML, BentomlEngine),
+            (Engine.LLAMACPP, LlamaCppEngine),
         ],
     )
     def test_engine_class_for(self, engine, expected):
@@ -61,6 +64,7 @@ class TestFactory:
             (Engine.VLLM, VllmEngine),
             (Engine.VLLM_OMNI, VllmOmniEngine),
             (Engine.BENTOML, BentomlEngine),
+            (Engine.LLAMACPP, LlamaCppEngine),
         ],
     )
     def test_build_engine_instantiates(self, engine, expected):
@@ -95,10 +99,16 @@ class TestClassAttributes:
         assert BentomlEngine.ARGS_FORMAT is EngineArgsFormat.FORWARDED
         assert BentomlEngine.requires_aiter_kernels is False
 
+    def test_llamacpp_args_model_and_format(self):
+        assert LlamaCppEngine.ARGS_MODEL is LlamaCppEngineArgsModel
+        assert LlamaCppEngine.ARGS_FORMAT is EngineArgsFormat.STANDARD
+        assert LlamaCppEngine.requires_aiter_kernels is False
+
     def test_engine_hierarchy(self):
         assert issubclass(VllmEngine, BaseEngine)
         assert issubclass(VllmOmniEngine, VllmEngine)
         assert issubclass(BentomlEngine, BaseEngine)
+        assert issubclass(LlamaCppEngine, BaseEngine)
 
 
 class TestLaunchPrefix:
@@ -137,6 +147,13 @@ class TestEngineDefaults:
         eng.apply_engine_defaults(args, ["model-a"])
         assert "served-model-name" not in args
 
+    def test_llamacpp_no_served_model_name(self):
+        # llama-server has no served-model-name-equivalent flag; base no-op.
+        eng = build_engine(_config(Engine.LLAMACPP), _engine_config(Engine.LLAMACPP))
+        args: dict = {}
+        eng.apply_engine_defaults(args, ["model-a"])
+        assert "served-model-name" not in args
+
 
 class TestSerialize:
     def test_vllm_standard_format(self):
@@ -146,6 +163,10 @@ class TestSerialize:
     def test_bentoml_forwarded_format(self):
         eng = build_engine(_config(Engine.BENTOML), _engine_config(Engine.BENTOML))
         assert eng.serialize_engine_args({"port": 8000}) == ["--arg", "port=8000"]
+
+    def test_llamacpp_standard_format(self):
+        eng = build_engine(_config(Engine.LLAMACPP), _engine_config(Engine.LLAMACPP))
+        assert eng.serialize_engine_args({"ctx-size": 8192}) == ["--ctx-size", "8192"]
 
 
 class TestEnvValidation:

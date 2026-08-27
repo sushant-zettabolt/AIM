@@ -1,0 +1,105 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# platform defaults are filled in when the key is missing at the top level.
+platformDefaults:
+  instinct:
+    platform: instinct
+    image: "docker.io/amdenterpriseai/aim-meta-llama-llama-3-1-8b-instruct:0.11.1"
+    gpus: 1
+    memory_per_gpu: 64
+    cpu_per_gpu: 4
+    env_vars: {}
+  epyc:
+    platform: epyc
+    image: "docker.io/amdenterpriseai/aim-epyc-meta-llama-llama-3-1-8b-instruct:0.11.0-preview"
+    gpus: 0
+    cpus: 188
+    memory: 128
+    env_vars:
+      AIM_PRECISION: "bf16"
+      AIM_ALLOW_UNOPTIMIZED: "true"
+  radeon:
+    platform: radeon
+    image: "docker.io/amdenterpriseai/aim-radeon-qwen-qwen3-vl-8b-instruct:0.12.0-preview"
+    gpus: 1
+    memory_per_gpu: 32
+    cpu_per_gpu: 4
+    env_vars: {}
+
+existingService: null  # Specify this to override the whole implementation, and use an existing service instead
+
+nameOverride: null
+fullnameOverride: null
+metadata:
+  labels: {}
+  project_id: null
+  user_id: null
+  workload_id: null # defaults to the release name
+
+replicas: 1
+
+# Off by default: most engines (vLLM, BentoML) download/cache their own
+# model at launch and don't need this. Turn on for engines that require the
+# model pre-staged in AIM's cache dir before serve() runs (e.g. llamacpp) —
+# see templates/deployment.yml's initContainers block. When enabling this,
+# also set env_vars.AIM_CACHE_PATH to a path under /workload so the
+# init container's download and the main container's read land on the same
+# mounted volume.
+modelCacheInit:
+  enabled: false
+
+imagePullSecrets: []
+  # Example:
+  # - name: ghcr-regcred
+
+env_vars: {}
+  # Available AIM Environment Variables:
+  #
+  # You may provide a HuggingFace token that's stored in a Secret called `hf-token` in the key `hf-token` by adding:
+  # HF_TOKEN:
+  #   key: hf-token
+  #   name: hf-token
+
+storage:
+  ephemeral:
+    quantity: 256Gi
+    # Omit storageClassName and accessModes to fall back to ephemeral storage
+    storageClassName: mlstorage
+    accessModes:
+      - ReadWriteOnce
+  dshm:
+    sizeLimit: 32Gi
+
+kaiwo:
+  enabled: false
+
+customProfiles: {} # Example custom profile below (top key is the filename)
+  # vllm-mi300x-fp16-tp1-latency-custom.yaml:
+  #   aim_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+  #   model_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+  #   metadata:
+  #     engine: vllm
+  #     gpu: MI300X
+  #     precision: fp16
+  #     gpu_count: 8
+  #     metric: latency
+  #     manual_selection_only: false
+  #     type: unoptimized
+  #   engine_args:
+  #     gpu-memory-utilization: 0.95
+  #     distributed_executor_backend: mp
+  #     no-enable-chunked-prefill: null
+  #     max-model-len: 32768
+  #     dtype: float16
+  #     tensor-parallel-size: 8
+  #   env_vars:
+  #     VLLM_DO_NOT_TRACK: "1"
+  #     VLLM_USE_TRITON_FLASH_ATTN: "0"
+  #     HIP_FORCE_DEV_KERNARG: "1"
+  #     NCCL_MIN_NCHANNELS: "112"
+  #     TORCH_BLAS_PREFER_HIPBLASLT: "1"
+  #     PYTORCH_TUNABLEOP_ENABLED: "1"
+  #     PYTORCH_TUNABLEOP_VERBOSE: "1"
+  #     PYTORCH_TUNABLEOP_TUNING: "0"

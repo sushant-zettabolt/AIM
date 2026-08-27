@@ -34,6 +34,7 @@ from aim_runtime.engines.engine_args_models import (
 if TYPE_CHECKING:
     from aim_runtime.config import AIMConfig
     from aim_runtime.engine_config import EngineConfig
+    from aim_runtime.model_cache_resolver import ResolvedModelPath
     from aim_runtime.object_model import Profile
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,18 @@ class BaseEngine(ABC):
     def apply_engine_defaults(self, engine_args: dict[str, Any], served_model_names: list[str]) -> None:
         """Apply engine-specific argument defaults in place. Base: no-op."""
         return None
+
+    def resolve_model_path(self, resolved: "ResolvedModelPath", engine_args: dict[str, Any]) -> str:
+        """Return the path/reference to pass via ``model_arg``, given the cache resolver's result.
+
+        Base: identity — return the resolved path as-is (a directory, or the
+        bare model id when nothing was found in the cache). Engines that need
+        a specific file within that directory (e.g. llama.cpp's single-``.gguf``
+        requirement) override this. ``engine_args`` is passed (and may be
+        mutated in place, e.g. to pop a non-CLI resolution hint) so an override
+        can consult profile-level hints without a separate lookup.
+        """
+        return resolved.path
 
     @classmethod
     def validate_engine_args(cls, engine_args: dict[str, Any]) -> None:

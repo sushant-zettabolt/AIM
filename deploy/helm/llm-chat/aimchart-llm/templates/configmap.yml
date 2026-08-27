@@ -1,0 +1,26 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+{{- $pv := include "aimchart-llm.platformValues" . | fromYaml -}}
+{{- $ctx := merge (dict "Values" $pv) (omit . "Values") -}}
+{{- with $ctx -}}
+
+{{ if .Values.customProfiles -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aimchart-llm.configmap.name" . }}
+  labels:
+    app: {{ include "aimchart-llm.configmap.name" . }}
+    {{- range $key, $value := .Values.metadata.labels }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+data:
+  {{- range $filename, $content := .Values.customProfiles }}
+  {{ $filename }}: |
+{{ toYaml $content | indent 4 }}
+  {{- end }}
+{{- end }}
+
+{{- end -}}

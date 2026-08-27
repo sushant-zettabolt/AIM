@@ -3,11 +3,12 @@
 # SPDX-License-Identifier: MIT
 
 # Overrides for deploying our llama.cpp-backed AIM image instead of this
-# chart's default vLLM-based epyc image. Deliberately values-only — no
-# template changes anywhere in this chart or in the aimchart-llm dependency
-# (both are already engine-agnostic: aimchart-llm just runs whatever `image:`
-# it's given, sized off gpus/cpus/memory, with imagePullPolicy: Always —
-# see aimchart-llm/templates/deployment.yml).
+# chart's default vLLM-based epyc image. Turns on aimchart-llm's
+# modelCacheInit (vendored template addition — see
+# aimchart-llm/templates/deployment.yml) because, unlike vLLM, this engine's
+# resolve_model_path requires the model already pre-staged in AIM's cache
+# dir (src/aim_runtime/engines/llamacpp.py) rather than downloading it
+# itself at launch.
 #
 # Usage:
 #   helm dependency build .
@@ -18,17 +19,17 @@
 global:
   platform: epyc
 
-# OpenWebUI's own ephemeral storage. Upstream default storageClassName
-# (mlstorage) doesn't exist on this cluster, and we deliberately don't assume
-# any specific StorageClass exists at all (kind's "standard" is kind-specific;
-# a bare kubeadm cluster ships no default StorageClass). Leaving this null
-# uses the chart's own built-in fallback (templates/_helpers.tpl:84-103) to
-# emptyDir instead of a PVC — no template changes needed, and it works
-# identically on any single-node cluster. Tradeoff: emptyDir doesn't survive
-# a pod restart, so the GGUF model re-downloads from HF on next start.
+# OpenWebUI's own storage. Upstream default storageClassName (mlstorage)
+# doesn't exist on this cluster. `local-path` is Rancher's local-path-provisioner
+# StorageClass — install it once per cluster (see command.md's cluster
+# bring-up sequence) and it dynamically provisions a hostPath-backed PV per
+# PVC on whichever node the pod lands on. With a real StorageClass set,
+# templates/pvc.yaml creates a real named PVC (survives pod
+# replacement/rollout, not just container restarts) instead of the
+# emptyDir fallback (templates/_helpers.tpl's container.volumes).
 storage:
   ephemeral:
-    storageClassName: null
+    storageClassName: local-path
 
 llm:
   # Built via the real 3-layer pattern: assets/epyc/engines/llamacpp/image/Dockerfile
@@ -41,7 +42,7 @@ llm:
   # separate, independently-pullable images. Canonical name per
   # get_model_image_name('epyc', 'aim-smoketest-llamacpp-tiny', 'llamacpp')
   # in src/aim_utils/image_naming.py.
-  image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.1.0"
+  image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.3.0"
 
   gpus: 0
   # Tiny 0.5B model (see the profile's engine_args) -- deliberately light vs.
@@ -52,11 +53,30 @@ llm:
   cpus: 4
   memory: 4
 
+  # Same local-path StorageClass as the top-level storage block above — see
+  # that comment. This one matters more than OpenWebUI's: without a real
+  # PVC here, the model the init container downloads (below) is gone on the
+  # next pod replacement and re-downloads from HF, same as before.
   storage:
     ephemeral:
-      storageClassName: null
+      storageClassName: local-path
+
+  # llamacpp requires the model pre-staged before serve() runs.
+  # modelCacheInit runs `./entrypoint.py download-to-cache` in an init
+  # container, same image/env, so it resolves the identical profile; it
+  # needs AIM_CACHE_PATH (below) to land on the same /workload-mounted
+  # volume the main container reads from, not the init container's own
+  # writable layer (which the main container never sees).
+  modelCacheInit:
+    enabled: true
 
   env_vars:
+    # Under /workload (the shared ephemeral-storage mount — see
+    # aimchart-llm.container.volumeMounts) so the init container's download
+    # and the main container's ModelCacheResolver read agree on where the
+    # model lives. Default (config.py's DEFAULT_CACHE_PATH) is
+    # /workspace/model-cache, which isn't on any mounted volume here.
+    AIM_CACHE_PATH: "/workload/model-cache"
     # platformDefaults.epyc.env_vars (aimchart-llm's own values.yaml) sets
     # AIM_PRECISION: "bf16" for the vLLM default image -- env_vars deep-merges
     # (mergeOverwrite in aimchart-llm's _main.tpl), so it survives into this
