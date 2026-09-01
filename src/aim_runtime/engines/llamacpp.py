@@ -4,13 +4,15 @@
 
 """llama.cpp engine.
 
-Owns two llama.cpp-specific concerns: native argument validation
-(:class:`LlamaCppEngineArgsModel`) and resolving a cached model directory down
+Owns three llama.cpp-specific concerns: native argument validation
+(:class:`LlamaCppEngineArgsModel`), resolving a cached model directory down
 to the single ``.gguf`` file ``llama-server -m`` needs
-(:meth:`LlamaCppEngine.resolve_model_path`). CLI args serialize as standard
-``--key value`` flags (``ARGS_FORMAT`` inherited from :class:`BaseEngine`),
-and no AITER kernels are needed on CPU (``requires_aiter_kernels`` inherited
-as ``False``).
+(:meth:`LlamaCppEngine.resolve_model_path`), and plumbing ``HF_TOKEN`` through
+to llama-server's own ``--hf-token`` flag (:meth:`LlamaCppEngine.apply_engine_defaults`),
+since it has no env-var convention of its own for gated repos. CLI args
+serialize as standard ``--key value`` flags (``ARGS_FORMAT`` inherited from
+:class:`BaseEngine`), and no AITER kernels are needed on CPU
+(``requires_aiter_kernels`` inherited as ``False``).
 
 Model loading goes through AIM's own model-cache resolver, the same as
 vLLM/BentoML: the profile's ``engines.yaml`` entry sets ``model_arg: -m``, so
@@ -134,6 +136,23 @@ class LlamaCppEngine(BaseEngine):
 
     ARGS_MODEL: ClassVar[Optional[type[EngineArgsModel]]] = LlamaCppEngineArgsModel
     ARGS_FORMAT: ClassVar[EngineArgsFormat] = EngineArgsFormat.STANDARD
+
+    def apply_engine_defaults(self, engine_args: dict[str, Any], served_model_names: list[str]) -> None:
+        """Plumb ``HF_TOKEN`` through to llama-server's ``--hf-token`` flag.
+
+        Unlike vLLM/``huggingface_hub``, which read the ``HF_TOKEN`` env var
+        on their own, ``llama-server`` has no such convention — it only
+        accepts a token via an explicit CLI flag. Reading it from the process
+        environment here (rather than requiring it hardcoded into
+        ``engine_args``/the profile YAML) lets it come from a K8s Secret via
+        the Helm chart's existing ``env_vars`` ``secretKeyRef`` support, the
+        same pattern already used for ``HF_TOKEN`` with other engines. An
+        explicit ``hf-token``/``hf_token`` already in ``engine_args`` wins
+        over the env var.
+        """
+        token = os.environ.get("HF_TOKEN")
+        if token and "hf-token" not in engine_args and "hf_token" not in engine_args:
+            engine_args["hf-token"] = token
 
     def resolve_model_path(self, resolved: "ResolvedModelPath", engine_args: dict[str, Any]) -> str:
         """Resolve a cached model directory down to a single ``.gguf`` file.

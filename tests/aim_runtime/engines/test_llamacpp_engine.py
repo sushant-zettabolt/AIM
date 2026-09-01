@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Tests for LlamaCppEngineArgsModel validation and LlamaCppEngine.resolve_model_path."""
+"""Tests for LlamaCppEngineArgsModel validation, LlamaCppEngine.resolve_model_path,
+and LlamaCppEngine.apply_engine_defaults (HF_TOKEN plumbing)."""
 
 from __future__ import annotations
 
@@ -108,3 +109,42 @@ class TestResolveModelPath:
         resolved = ResolvedModelPath(path=str(tmp_path), is_local_dir=True, model_id="org/model")
         with pytest.raises(ValueError, match="Multiple .gguf files"):
             eng.resolve_model_path(resolved, {})
+
+
+class TestApplyEngineDefaultsHfToken:
+    def test_injects_hf_token_from_env(self, monkeypatch):
+        monkeypatch.setenv("HF_TOKEN", "secret-token")
+        eng = _engine()
+        engine_args: dict = {}
+
+        eng.apply_engine_defaults(engine_args, ["model-a"])
+
+        assert engine_args["hf-token"] == "secret-token"
+
+    def test_no_env_var_no_injection(self, monkeypatch):
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        eng = _engine()
+        engine_args: dict = {}
+
+        eng.apply_engine_defaults(engine_args, ["model-a"])
+
+        assert "hf-token" not in engine_args
+
+    def test_explicit_kebab_value_wins_over_env(self, monkeypatch):
+        monkeypatch.setenv("HF_TOKEN", "from-env")
+        eng = _engine()
+        engine_args = {"hf-token": "from-profile"}
+
+        eng.apply_engine_defaults(engine_args, ["model-a"])
+
+        assert engine_args["hf-token"] == "from-profile"
+
+    def test_explicit_snake_value_wins_over_env(self, monkeypatch):
+        monkeypatch.setenv("HF_TOKEN", "from-env")
+        eng = _engine()
+        engine_args = {"hf_token": "from-profile"}
+
+        eng.apply_engine_defaults(engine_args, ["model-a"])
+
+        assert "hf-token" not in engine_args
+        assert engine_args["hf_token"] == "from-profile"

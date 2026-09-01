@@ -20,23 +20,25 @@ OpenWebUI pod both reached `1/1 Running`, with the old
 probe.
 
 What this does **not** cover yet:
-- **No real EPYC/ZenDNN build in the K8s path.** The 3-layer image
-  (`assets/epyc/engines/llamacpp/image/Dockerfile`) is a generic-CPU build
-  (`GGML_ZENDNN` unset) — this dev machine isn't real EPYC silicon. Only
-  the separate standalone Docker build
-  (`deploy/epyc-standalone/Dockerfile`) compiles with `GGML_ZENDNN=ON`,
-  and it was never folded into the 3-layer image or deployed to K8s; see
-  `deploy/epyc-standalone/NOTES.md` for what's deferred there.
-- **No gated/authenticated Hugging Face model support for this engine.**
-  `llama-server` itself supports `--hf-token`, but `LlamaCppEngine`
-  (`src/aim_runtime/engines/llamacpp.py`) has no `hf_token` field and
-  nothing plumbs an `HF_TOKEN` env var into its `engine_args`, unlike
-  `vllm.py:164`. Setting `HF_TOKEN` via the Helm chart's `env_vars` today
-  only sets the env var in the pod — nothing reads it for this engine.
-- **No engine-specific defaults applied.** `LlamaCppEngine.apply_engine_defaults()`
-  is the inherited no-op (`base.py:77`), unlike `VllmEngine`'s override
-  (`vllm.py:369`), which auto-injects `served-model-name` at launch. Every
-  value this engine needs (`threads`, `ctx-size`, etc.) has to be hand-set
+- **No ZenDNN image built or benchmarked yet.** Layer 1
+  (`assets/epyc/engines/llamacpp/image/Dockerfile`) now compiles with
+  `GGML_ZENDNN=ON` by default, folding in what previously existed only in
+  the standalone build (`deploy/epyc-standalone/Dockerfile`) — but it must
+  be built *on* real EPYC silicon (`GGML_NATIVE` defaults to on, so the
+  binary is tuned to its build host), and no such image has been produced,
+  pushed, or measured. Every image deployed so far is the generic-CPU
+  build. See `deploy/epyc-standalone/NOTES.md` for what remains deferred
+  there.
+- **Deployed llama.cpp throughput is unexplained.** The generic-CPU image
+  under the nested-K8s deployment measured 0.26 tok/s generating with
+  Qwen2.5-0.5B-Instruct Q8_0 on a 4-CPU limit — with `nr_throttled 0` and
+  roughly 0.8 CPU of the 4 actually consumed, so it is neither cgroup
+  throttling nor a saturated core. Whether the ZenDNN/native rebuild
+  resolves it is untested.
+- **No auto-computed defaults beyond `HF_TOKEN`.** `LlamaCppEngine.apply_engine_defaults()`
+  now plumbs `HF_TOKEN` (see "Resolved" below) but doesn't compute anything
+  else, unlike `VllmEngine`'s override (`vllm.py:369`), which auto-injects
+  `served-model-name` at launch. Every other value this engine needs (`threads`, `ctx-size`, etc.) has to be hand-set
   in the profile/Helm values and manually kept in sync with pod resource
   limits — nothing is computed or defaulted by the engine itself.
 - **Single-node only**, and (on the kubeadm path) no `metrics-server`, so
@@ -116,6 +118,16 @@ What this does **not** cover yet:
   manifests, no Helm) is deleted; the real single-node `kubeadm` cluster via
   `deploy/helm/llm-chat/` + `command.md` is now the only supported
   deployment target, so there's one path to keep correct instead of two.
+- **Gated/authenticated Hugging Face model support.** `LlamaCppEngine` now
+  overrides `apply_engine_defaults()` to read `HF_TOKEN` from the process
+  environment and inject it as `engine_args["hf-token"]` before
+  serialization — unlike vLLM/`huggingface_hub`, `llama-server` has no env
+  var convention of its own for gated repos, only an explicit CLI flag.
+  This lets the token come from a K8s Secret via the Helm chart's existing
+  `env_vars` `secretKeyRef` support (already used for `HF_TOKEN` with other
+  engines) instead of being hardcoded into a profile. An explicit
+  `hf-token`/`hf_token` already in `engine_args` takes precedence over the
+  env var.
 
 For day-to-day cluster operation (health checks, logs, teardown, full
 rebuild) see **`command.md`** — that file is the *how*; this one is the

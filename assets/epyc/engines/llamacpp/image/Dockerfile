@@ -14,9 +14,17 @@
 # ships python+vllm pre-installed. No AIM runtime code, no ENTRYPOINT: Layer 2
 # owns both.
 #
-# Generic CPU build (no GGML_ZENDNN) — this isn't real EPYC silicon. See
-# deploy/epyc-standalone/Dockerfile for the ZenDNN-tuned variant meant for the
-# actual EPYC box.
+# ZenDNN-enabled by default (GGML_ZENDNN below). Earlier revisions of this
+# file shipped a generic CPU build because no EPYC host was available to
+# compile on; that is no longer true, and the generic build measured
+# 0.26 tok/s for a 0.5B Q8_0 under the nested-K8s deployment. Build this on
+# real Zen hardware — see deploy/epyc-standalone/Dockerfile, the throwaway
+# single-stage predecessor this folds back into the real 3-layer pattern.
+#
+# Note GGML_NATIVE stays at llama.cpp's default (ON), i.e. -march=native, so
+# the resulting binary is tuned for -- and only portable to -- the machine
+# that compiled it. That is intended for a per-cluster EPYC image; it does
+# mean the image is not portable to a different microarchitecture.
 #
 # apt note: ubuntu:24.04's default sources.list.d/ubuntu.sources points at
 # plain-HTTP archive.ubuntu.com/security.ubuntu.com, which some egress paths
@@ -54,8 +62,16 @@ WORKDIR /opt/llama.cpp
 # disables itself at configure time if it can't find one rather than
 # failing the build -- hence libssl-dev above and -DLLAMA_OPENSSL=ON here,
 # spelled out instead of relying on autodetection.
+# GGML_ZENDNN=ON pulls in AMD's ZenDNN backend; the backend's CMakeLists
+# downloads and builds ZenDNN itself as part of this step (see llama.cpp's
+# docs/backend/ZenDNN.md), which is why the pip cmake>=3.28 above matters --
+# apt's cmake can lag the >=3.25 that CMakeLists requires. Exposed as a
+# build arg so the image can still be produced without ZenDNN
+# (--build-arg GGML_ZENDNN=OFF) on a non-Zen builder.
+ARG GGML_ZENDNN=ON
 RUN cmake -B build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_ZENDNN=${GGML_ZENDNN} \
       -DLLAMA_CURL=ON \
       -DLLAMA_OPENSSL=ON \
     && cmake --build build --config Release -j"$(nproc)"
@@ -100,3 +116,10 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 # provide it directly -- deploy/epyc-standalone/Dockerfile already hit and
 # worked around this identical gap the same way.
 RUN pip3 install --no-cache-dir "huggingface-hub==0.36.2"
+
+# Matches deploy/epyc-standalone/Dockerfile's runtime env. Only meaningful
+# when the ZenDNN backend is compiled in (GGML_ZENDNN=ON above); harmless
+# otherwise, since a non-ZenDNN llama-server never reads it. Overridable per
+# deployment through the chart's env_vars if a sweep wants to compare
+# matmul algorithms.
+ENV ZENDNNL_MATMUL_ALGO="1"
