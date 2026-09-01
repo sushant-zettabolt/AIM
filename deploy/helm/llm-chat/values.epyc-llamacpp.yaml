@@ -44,6 +44,17 @@ llm:
   # in src/aim_utils/image_naming.py.
   image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.3.0"
 
+  # The tag above is pinned and immutable, and by the time the main
+  # container starts the modelCacheInit container has already pulled it, so
+  # a fresh pull per pod start buys nothing. With the chart default
+  # ("Always") the nested-K8s smoke test exhausted anonymous Docker Hub
+  # pulls across pod restarts and the main container wedged in
+  # ImagePullBackOff on `429 Too Many Requests` -- with the init container
+  # running happily from the cached image in the same pod. Bump the tag to
+  # roll out a new build; that changes the reference and forces a pull
+  # regardless of this setting.
+  imagePullPolicy: IfNotPresent
+
   gpus: 0
   # Tiny 0.5B model (see the profile's engine_args) -- deliberately light vs.
   # the 10-core reservation used for the earlier vLLM/8B-class smoke test.
@@ -92,6 +103,63 @@ llm:
     # AIM_ID correctly resolved the one llamacpp profile that exists.
     # Confirmed by local docker-run reproduction before this was added.
     AIM_ENGINE: "llamacpp"
+    # NOTE: do NOT try to solve the accelerator mismatch below with
+    # AIM_ACCELERATOR_MODEL. It is silently a no-op on this (CPU) path:
+    # accelerator_detector.py's detect() forwards accelerator_model_override
+    # only to _detect_gpu(); the CPU branch calls _detect_cpu(family) and
+    # never sees it. Verified empirically -- the var rendered into both
+    # containers and detection still reported EPYC_ZEN5.
+
+# The baked-in profile (assets/epyc/aim-smoketest/llamacpp-tiny/profiles/
+# llamacpp-cpu-int8-tp1-latency.yaml) declares accelerator_model: CPU, which
+# is unmatchable on this box: cpu_detector resolves real silicon -- an EPYC
+# 9755 maps to EPYC_ZEN5 through aim_common/object_model.py's model-number
+# table -- and profile_selector.py:444 compares the two with a plain !=,
+# with no "generic CPU matches any CPU" case. AcceleratorModel.CPU is only
+# ever returned by cpu_detector.py's _fallback_to_generic_cpu, i.e. on
+# *unrecognized* AMD parts. Confirmed on the nested-K8s smoke test: the
+# init container exited 1 with "1 accelerator_mismatch" before reaching any
+# download.
+#
+# Profiles are baked into the image, so correcting the asset needs a Layer 3
+# rebuild. customProfiles avoids that: configmap.yml renders these into a
+# ConfigMap mounted at /workspace/aim-runtime/profiles/custom, which is
+# FIRST in the registry's search precedence, and _helpers.tpl's
+# container.volumeMounts is shared by the main and modelCacheInit
+# containers so both resolve the same profile.
+#
+# Identical to the baked profile except accelerator_model/accelerator_count,
+# matching the convention every shipped epyc vLLM profile follows (concrete
+# silicon + real core count, e.g. vllm-epyc_zen5-bf16-tp1-throughput.yaml's
+# EPYC_ZEN5/124). Distinct filename so it sits alongside the baked profile
+# rather than shadowing it -- the baked one stays visible as
+# accelerator_mismatch in the breakdown, which is useful signal.
+#
+# accelerator_count is advisory here, not a match key: for accelerator_type
+# cpu, profile_selector.py:451-457 only warns when detected cores are FEWER
+# than the profile's count. 4 matches engine_args.threads and the cpus set
+# above (the container still sees all 256 cores -- K8s cpu limits are CFS
+# quota, not cpuset, so cpuset_bind reads 0-255 regardless).
+  customProfiles:
+    llamacpp-epyc_zen5-int8-tp1-latency.yaml:
+      aim_id: aim-smoketest/llamacpp-tiny
+      model_id: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+      metadata:
+        engine: llamacpp
+        accelerator_type: cpu
+        accelerator_model: EPYC_ZEN5
+        accelerator_count: 4
+        precision: int8
+        variant: q8-0
+        metric: latency
+        manual_selection_only: false
+        type: unoptimized
+      engine_args:
+        gguf_filename: "qwen2.5-0.5b-instruct-q8_0.gguf"
+        host: "0.0.0.0"
+        ctx-size: 8192
+        threads: 4
+      env_vars: {}
   # AIM_ID is already baked into the image by docker/Dockerfile.aim (ORG/MODEL
   # build args); combined with AIM_ENGINE above, no AIM_ENGINE_ARGS override
   # is needed unless you want to change ctx-size/threads without rebuilding

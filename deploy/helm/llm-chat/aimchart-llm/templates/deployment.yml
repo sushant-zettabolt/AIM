@@ -40,6 +40,11 @@ spec:
         # own writable layer.
         - name: model-cache-init
           image: {{ .Values.image | quote }}
+          # Same policy as the main container: both run the identical image,
+          # so letting them diverge means the init container can start from
+          # cache while the main container fails its pull -- which is
+          # exactly the split seen when this was hardcoded.
+          imagePullPolicy: {{ .Values.imagePullPolicy | default "Always" | quote }}
           command: ["./entrypoint.py", "download-to-cache"]
           {{- if .Values.env_vars }}
           env:
@@ -55,7 +60,16 @@ spec:
             {{- include "aimchart-llm.container.env" . | nindent 12 }}
           {{- end }}
           image: {{ .Values.image | quote }}
-          imagePullPolicy: "Always"
+          # Was hardcoded "Always", which forces a registry round-trip on
+          # every pod start even for an immutable pinned tag already on the
+          # node. On a restart loop that burns anonymous Docker Hub pulls
+          # fast -- observed as `429 Too Many Requests` from
+          # registry-1.docker.io on the nested-K8s smoke test, while the
+          # init container (no explicit policy, so IfNotPresent for a
+          # non-:latest tag) started fine from the cached image in the same
+          # pod. Default is unchanged; set imagePullPolicy: IfNotPresent to
+          # opt out when the tag is pinned.
+          imagePullPolicy: {{ .Values.imagePullPolicy | default "Always" | quote }}
           ports:
             - name: http
               containerPort: {{ default 8000 .Values.env_vars.AIM_PORT }}

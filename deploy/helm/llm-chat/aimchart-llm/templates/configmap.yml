@@ -6,7 +6,13 @@
 {{- $ctx := merge (dict "Values" $pv) (omit . "Values") -}}
 {{- with $ctx -}}
 
-{{ if .Values.customProfiles -}}
+{{/* No trailing chomp on this if: with `-}}` the newline before apiVersion
+     is eaten and, because the preceding `{{- with $ctx -}}` already
+     swallowed the header comment's newline, apiVersion lands glued onto
+     the end of the SPDX comment line -- commenting it out and rendering a
+     ConfigMap document with no apiVersion at all ("error validating data:
+     apiVersion not set"). Latent until customProfiles was first used. */}}
+{{ if .Values.customProfiles }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

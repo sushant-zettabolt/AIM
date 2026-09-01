@@ -50,6 +50,13 @@ replicas: 1
 modelCacheInit:
   enabled: false
 
+# Applied to both the main and modelCacheInit containers (templates/
+# deployment.yml). "Always" is the safe default for a moving tag; set
+# IfNotPresent for an immutable pinned tag to avoid a registry round-trip on
+# every pod start (and the Docker Hub rate limiting that follows on a
+# restart loop).
+imagePullPolicy: Always
+
 imagePullSecrets: []
   # Example:
   # - name: ghcr-regcred
