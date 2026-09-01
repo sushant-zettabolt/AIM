@@ -69,12 +69,28 @@ WORKDIR /opt/llama.cpp
 # build arg so the image can still be produced without ZenDNN
 # (--build-arg GGML_ZENDNN=OFF) on a non-Zen builder.
 ARG GGML_ZENDNN=ON
+
+# Job count for the compile. Defaults to nproc, but pass BUILD_JOBS to match
+# the *builder's* real CPU allowance: nproc reports the host's core count,
+# and a build container's own cgroup reads "max" (buildkit sets no CPU
+# limit), so neither sees an enclosing limit. Building inside a 32-core pod
+# on a 256-core host, the nproc default oversubscribes 8:1 and inflates
+# per-file wall times by roughly that factor.
+ARG BUILD_JOBS
+
+# Only llama-server (what Layer 2 runs) and llama-bench (needed to measure
+# engine throughput independently of the AIM stack). A default build makes
+# 560 targets -- every tool and test binary, llama-tts and llama-llava-cli
+# included -- none of which are shipped or run. Their dependencies
+# (libllama, libggml-base, libggml-cpu, the ZenDNN backend) are still built,
+# since these two targets link them.
 RUN cmake -B build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_ZENDNN=${GGML_ZENDNN} \
       -DLLAMA_CURL=ON \
       -DLLAMA_OPENSSL=ON \
-    && cmake --build build --config Release -j"$(nproc)"
+    && cmake --build build --config Release -j"${BUILD_JOBS:-$(nproc)}" \
+         --target llama-server llama-bench
 
 # build/bin/ (binary + every .so it linked, $ORIGIN-relative rpaths) copied
 # whole rather than cmake --install, matching the layout already confirmed
