@@ -42,7 +42,7 @@ llm:
   # separate, independently-pullable images. Canonical name per
   # get_model_image_name('epyc', 'aim-smoketest-llamacpp-tiny', 'llamacpp')
   # in src/aim_utils/image_naming.py.
-  image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.3.0"
+  image: "docker.io/stpauljackson3/aim-epyc-target-llamacpp-model-aim-smoketest-llamacpp-tiny:0.4.1"
 
   # The tag above is pinned and immutable, and by the time the main
   # container starts the modelCacheInit container has already pulled it, so
@@ -55,13 +55,31 @@ llm:
   # regardless of this setting.
   imagePullPolicy: IfNotPresent
 
+  # Multi-instance smoke test: 2 identical llama-server pods behind the one
+  # ClusterIP Service (aimchart-llm/templates/service.yml) that already
+  # selects on `app: <fullname>` regardless of replica count -- no template
+  # change needed. kube-proxy round-robins across both pods' endpoints on
+  # every new connection, so this is real K8s Service load balancing, not
+  # anything we're adding ourselves. Each replica gets its own
+  # modelCacheInit init container run; both write into the same shared
+  # ReadWriteOnce PVC (fine here since it's a single-node cluster -- RWO
+  # only forbids mounting from a second *node*, not a second pod on the
+  # same node).
+  replicas: 2
+
   gpus: 0
   # Tiny 0.5B model (see the profile's engine_args) -- deliberately light vs.
   # the 10-core reservation used for the earlier vLLM/8B-class smoke test.
-  # Keep threads (profile's engine_args.threads, currently 4) in sync with
+  # Keep threads (profile's engine_args.threads, currently 8) in sync with
   # this if you change it -- llama-server doesn't see the cgroup quota on
   # its own.
-  cpus: 4
+  #
+  # requests == limits (Guaranteed QoS, given the modelCacheInit init
+  # container now also carries matching resources -- see deployment.yml)
+  # is required for the static CPU Manager policy to grant this pod an
+  # exclusive, pinned cpuset instead of the CFS-quota/no-pinning behavior
+  # confirmed empirically at 4 cores.
+  cpus: 8
   memory: 4
 
   # Same local-path StorageClass as the top-level storage block above — see
@@ -109,6 +127,20 @@ llm:
     # only to _detect_gpu(); the CPU branch calls _detect_cpu(family) and
     # never sees it. Verified empirically -- the var rendered into both
     # containers and detection still reported EPYC_ZEN5.
+    #
+    # On THIS box cpu_detector actually falls back to generic "CPU" (its
+    # model number isn't in the recognized-silicon table), so the
+    # customProfiles EPYC_ZEN5 override below is permanently excluded as
+    # accelerator_mismatch and the RUNNING engine always uses the profile
+    # baked into the image (llamacpp-cpu-int8-tp1-latency.yaml) instead --
+    # confirmed empirically: editing customProfiles.engine_args.ctx-size
+    # had zero effect on the actual `llama-server ... --ctx-size` command.
+    # AIM_ENGINE_ARGS is command_generator.py's own documented escape hatch
+    # for exactly this -- it merges on top of whichever profile actually
+    # got selected (_merge_and_validate_engine_args: profile defaults <
+    # user overrides < system overrides), so it works regardless of the
+    # accelerator-mismatch fallback.
+    AIM_ENGINE_ARGS: '{"ctx-size": 20000, "threads": 8}'
 
 # The baked-in profile (assets/epyc/aim-smoketest/llamacpp-tiny/profiles/
 # llamacpp-cpu-int8-tp1-latency.yaml) declares accelerator_model: CPU, which
@@ -148,7 +180,7 @@ llm:
         engine: llamacpp
         accelerator_type: cpu
         accelerator_model: EPYC_ZEN5
-        accelerator_count: 4
+        accelerator_count: 8
         precision: int8
         variant: q8-0
         metric: latency
@@ -157,8 +189,17 @@ llm:
       engine_args:
         gguf_filename: "qwen2.5-0.5b-instruct-q8_0.gguf"
         host: "0.0.0.0"
-        ctx-size: 8192
-        threads: 4
+        # kv_unified means this ctx-size is a single pool SHARED across all
+        # n_slots (4, llama-server's default) concurrently-active requests
+        # on one instance, not 8192-per-slot -- confirmed empirically: a
+        # solo ~4142-token request succeeded fine, but 10 concurrent
+        # ~4100-token requests all failed with "Context size has been
+        # exceeded" once more than one landed on the same instance at once
+        # (4 slots * ~4150 tokens far exceeds the old 8192 total). Sized
+        # for 4 concurrent ~4150-token prompts (~16600) plus completion
+        # headroom (4 * max_tokens).
+        ctx-size: 20000
+        threads: 8
       env_vars: {}
   # AIM_ID is already baked into the image by docker/Dockerfile.aim (ORG/MODEL
   # build args); combined with AIM_ENGINE above, no AIM_ENGINE_ARGS override

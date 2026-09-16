@@ -1,0 +1,59 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Scaled-up version of values.epyc-llamacpp-pin-a.yaml/-pin-b.yaml: instead
+# of one overlay file + one `helm template|kubectl apply` per pinned
+# instance, `llm.instances` is a single list that
+# aimchart-llm/templates/deployment.yml's `aimchart-llm.deployment.instance`
+# define loops over, emitting one Deployment per entry from ONE render/apply.
+# Adding an 11th instance is one more list entry, not a new file.
+#
+#   helm template llm-pinned10 . -f values.yaml -f values.epyc-llamacpp.yaml \
+#     -f values.epyc-llamacpp-10instances.yaml | kubectl apply -f - -n aim-demo-standalone
+#
+# All 10 instances still share the one model-cache PVC, one customProfiles
+# ConfigMap, and one Service (all three keyed off the base fullname, not
+# touched by the instances loop) -- so the model downloads once, not once
+# per instance, and the existing Service load-balances across whichever of
+# these 10 pods are Ready, same kube-proxy behavior already proven earlier
+# in this session with 2 replicas.
+#
+# Core ranges, from this box's real topology (`numactl --hardware` /
+# `lscpu -e`): 2 sockets = 2 NUMA nodes, 96 physical cores + SMT2 each --
+# node 0 is logical CPUs 0-95 (thread 0) + 192-287 (thread-1 SMT sibling of
+# 0-95); node 1 mirrors this at 96-191 (thread 0) + 288-383 (thread 1).
+# All 10 instances deliberately pinned to node 1 ONLY, none on node 0:
+# 10 x 8 cores = 80 of node 1's 96 physical cores (96-175), each chunk
+# thread-0-only (no SMT sibling ever shared within or across instances,
+# and 288-383 stays untouched too) -- 16 physical cores on node 1 left
+# free, node 0 (0-95/192-287) untouched entirely.
+llm:
+  # Without this, the default fullname helper produces the doubled
+  # "llm-llm-pinned10-a" (chart alias "llm" + release name). Deliberately
+  # NOT "llm-pinned-a"/"-b" -- those names are already live in the cluster
+  # from the earlier single-pair experiment (values.epyc-llamacpp-pin-a/b.yaml)
+  # with an incompatible selector (no `instance` label); reusing them here
+  # would collide on `kubectl apply`.
+  fullnameOverride: llm-pinned10
+  instances:
+    - name: a
+      cpuAffinity: "96-103"   # node 1
+    - name: b
+      cpuAffinity: "104-111"  # node 1
+    - name: c
+      cpuAffinity: "112-119"  # node 1
+    - name: d
+      cpuAffinity: "120-127"  # node 1
+    - name: e
+      cpuAffinity: "128-135"  # node 1
+    - name: f
+      cpuAffinity: "136-143"  # node 1
+    - name: g
+      cpuAffinity: "144-151"  # node 1
+    - name: h
+      cpuAffinity: "152-159"  # node 1
+    - name: i
+      cpuAffinity: "160-167"  # node 1
+    - name: j
+      cpuAffinity: "168-175"  # node 1

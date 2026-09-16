@@ -1,0 +1,18 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# NUMA/SMT-aware core-pinning experiment, instance B -- see
+# values.epyc-llamacpp-pin-a.yaml for the full rationale. This one pins to
+# node 1's physical cores (96-103), the mirror-image socket, so instances A
+# and B never share a NUMA node: zero cross-socket memory traffic between
+# them and no contention for either's local memory bandwidth.
+#   helm template llm-pinned-b . -f values.yaml -f values.epyc-llamacpp.yaml \
+#     -f values.epyc-llamacpp-pin-b.yaml | kubectl apply -f - -n aim-demo-standalone
+llm:
+  replicas: 1
+  fullnameOverride: llm-pinned-b
+  cpuAffinity: "96-103"
+  metadata:
+    labels:
+      pin-group: "llm-pinned"

@@ -70,26 +70,34 @@ WORKDIR /opt/llama.cpp
 # (--build-arg GGML_ZENDNN=OFF) on a non-Zen builder.
 ARG GGML_ZENDNN=ON
 
-# Job count for the compile. Defaults to nproc, but pass BUILD_JOBS to match
-# the *builder's* real CPU allowance: nproc reports the host's core count,
-# and a build container's own cgroup reads "max" (buildkit sets no CPU
-# limit), so neither sees an enclosing limit. Building inside a 32-core pod
-# on a 256-core host, the nproc default oversubscribes 8:1 and inflates
-# per-file wall times by roughly that factor.
-ARG BUILD_JOBS
+# Job count for the compile. Defaults to 96: nproc reports the host's core
+# count, and a build container's own cgroup reads "max" (buildkit sets no
+# CPU limit), so neither sees an enclosing limit -- building inside a
+# 32-core pod on a 256-core host, an nproc-based default oversubscribed 8:1
+# and inflated per-file wall times by roughly that factor.
+ARG BUILD_JOBS=96
 
+# No -G Ninja: AMD's own documented build command
+# (docs/backend/ZenDNN.md) configures with CMake's default generator
+# (Unix Makefiles). The ZenDNN backend's external project (zendnnl, a
+# separate AMD CMake project vendored in via ExternalProject_Add) does not
+# reliably expose an "install" target when the parent build forces Ninja --
+# confirmed by reproducing the failure: `cmake --build` errors with
+# "ninja: error: unknown target 'install'" partway through the zendnnl
+# subbuild, specifically at its own install step, when -G Ninja is passed.
+#
 # Only llama-server (what Layer 2 runs) and llama-bench (needed to measure
 # engine throughput independently of the AIM stack). A default build makes
 # 560 targets -- every tool and test binary, llama-tts and llama-llava-cli
 # included -- none of which are shipped or run. Their dependencies
 # (libllama, libggml-base, libggml-cpu, the ZenDNN backend) are still built,
 # since these two targets link them.
-RUN cmake -B build -G Ninja \
+RUN cmake -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_ZENDNN=${GGML_ZENDNN} \
       -DLLAMA_CURL=ON \
       -DLLAMA_OPENSSL=ON \
-    && cmake --build build --config Release -j"${BUILD_JOBS:-$(nproc)}" \
+    && cmake --build build --config Release -j"${BUILD_JOBS}" \
          --target llama-server llama-bench
 
 # build/bin/ (binary + every .so it linked, $ORIGIN-relative rpaths) copied
@@ -109,6 +117,17 @@ RUN sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://s
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /opt/llama.cpp/build/bin/ /opt/llamacpp/
+# libggml-zendnn.so links against libzendnnl.so (ZenDNN's own core library,
+# built as a separate CMake ExternalProject into its own install prefix
+# under build/_deps/, not build/bin/) -- confirmed via `ldd
+# libggml-zendnn.so` that this is its only non-system dependency not
+# already covered by the build/bin/ copy above, and via `ldd libzendnnl.so`
+# that it in turn statically bundles all of ITS OWN deps (oneDNN, LIBXSMM,
+# AOCL-Utils), so this one file is the entire remaining gap. Without it,
+# llama-server fails at process startup with "error while loading shared
+# libraries: libzendnnl.so: cannot open shared object file" -- confirmed by
+# deploying without this line first.
+COPY --from=build /opt/llama.cpp/build/_deps/zendnn-prefix/build/install/zendnnl/lib/libzendnnl.so /opt/llamacpp/
 ENV PATH="/opt/llamacpp:${PATH}"
 # Unlike the official prebuilt release tarballs (or the ZenDNN build in
 # deploy/epyc-standalone/Dockerfile), a plain `cmake -B build` invocation

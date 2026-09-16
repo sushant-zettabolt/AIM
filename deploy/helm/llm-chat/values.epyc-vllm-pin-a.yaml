@@ -1,0 +1,26 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# vLLM core-pinning experiment, instance A -- vLLM counterpart to
+# values.epyc-llamacpp-pin-a.yaml. Same rationale (node 0, physical cores
+# 0-7, thread-0-only): see that file for the full NUMA/SMT topology writeup.
+#
+# Separate release from values.epyc-vllm.yaml (own fullnameOverride) for the
+# same reason as the llamacpp pin experiment: one Deployment's replicas all
+# share one pod template, so they can't get different `command:` overrides.
+#
+#   helm template llm-vllm-pinned-a . -f values.yaml -f values.epyc-vllm.yaml \
+#     -f values.epyc-vllm-pin-a.yaml | kubectl apply -f - -n aim-demo-standalone
+llm:
+  fullnameOverride: llm-vllm-pinned-a
+  cpuAffinity: "0-7"
+  # See values.epyc-vllm-10instances.yaml's comment on CPU_VISIBLE_MEMORY_NODES
+  # -- taskset doesn't touch memory-node affinity, so this tells vLLM's own
+  # NUMA-aware thread-count auto-sizing which node this instance's CPUs
+  # actually belong to (node 0 here).
+  env_vars:
+    CPU_VISIBLE_MEMORY_NODES: "0"
+  metadata:
+    labels:
+      pin-group: "llm-vllm-pinned"

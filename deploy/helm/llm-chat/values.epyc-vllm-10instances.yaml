@@ -1,0 +1,65 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# vLLM counterpart to values.epyc-llamacpp-10instances.yaml -- same
+# `llm.instances` range-loop mechanism (aimchart-llm.deployment.instance in
+# templates/deployment.yml, unmodified/engine-agnostic), same layout: 10
+# instances x 8 cores, all on NUMA node 1 only (logical CPUs 96-191 +
+# 288-383), thread-0-only, none on node 0. See
+# values.epyc-llamacpp-10instances.yaml for the full topology writeup.
+#
+#   helm template llm-vllm-pinned10 . -f values.yaml -f values.epyc-vllm.yaml \
+#     -f values.epyc-vllm-10instances.yaml | kubectl apply -f - -n aim-demo-standalone
+#
+# Unlike the llamacpp version, there's no shared PVC/model-cache to worry
+# about -- each instance downloads its own copy of the (tiny) model into
+# its own container's writable layer independently (see
+# values.epyc-vllm.yaml's AIM_MODEL_ID comment); 10 concurrent ~1GB HF
+# downloads is trivial on this box.
+#
+# CPU_VISIBLE_MEMORY_NODES: "1" -- REQUIRED here, not optional. Confirmed
+# empirically (all 10 pods hit this identically): `taskset` only sets CPU
+# affinity, never touches memory-node (cpuset.mems/Mems_allowed) affinity,
+# so every instance's /proc/*/status still reports
+# "Mems_allowed_list: 0-1" (both NUMA nodes) regardless of its cpuAffinity.
+# vLLM's own CPU-thread auto-binding (VLLM_CPU_OMP_THREADS_BIND=auto,
+# vllm/utils/ompmultiprocessing.py) picks its "local NUMA node" as
+# get_visible_memory_node()[local_rank] -- i.e. the first entry of that
+# raw, unfiltered 0-1 list, which is unconditionally node 0 -- then
+# filters its own taskset-restricted CPU list down to only that node's
+# CPUs. For every one of these node-1-pinned instances that intersection
+# is empty ("Selected CPU core number (0) should be greater than reserved
+# CPU core number (1)" in every pod's logs), so OMP silently collapses to
+# 1 thread total -- CPU affinity itself never leaked outside the pinned
+# range, but vLLM only used 1 of the 8 reserved cores per instance.
+# CPU_VISIBLE_MEMORY_NODES is vLLM's own documented override for exactly
+# this (get_visible_memory_node() reads it in preference to the raw
+# Mems_allowed list) -- setting it here, matching the node these 10
+# instances are actually pinned to, is what makes the two mechanisms
+# (taskset's CPU affinity, vLLM's own NUMA-aware thread sizing) agree.
+llm:
+  fullnameOverride: llm-vllm-pinned10
+  env_vars:
+    CPU_VISIBLE_MEMORY_NODES: "1"
+  instances:
+    - name: a
+      cpuAffinity: "96-103"   # node 1
+    - name: b
+      cpuAffinity: "104-111"  # node 1
+    - name: c
+      cpuAffinity: "112-119"  # node 1
+    - name: d
+      cpuAffinity: "120-127"  # node 1
+    - name: e
+      cpuAffinity: "128-135"  # node 1
+    - name: f
+      cpuAffinity: "136-143"  # node 1
+    - name: g
+      cpuAffinity: "144-151"  # node 1
+    - name: h
+      cpuAffinity: "152-159"  # node 1
+    - name: i
+      cpuAffinity: "160-167"  # node 1
+    - name: j
+      cpuAffinity: "168-175"  # node 1

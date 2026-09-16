@@ -1,0 +1,133 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# vLLM-backed deployment, replacing the llama.cpp experiment
+# (values.epyc-llamacpp*.yaml) for the core-pinning tests. Same chart, same
+# deployment.yml `cpuAffinity`/`instances` mechanism (untouched, engine-
+# agnostic — it just wraps the container's entrypoint in `taskset`) — only
+# the image/model/engine differ.
+#
+# Reuses the chart's own already-published epyc vLLM image
+# (docker.io/amdenterpriseai/aim-epyc-meta-llama-llama-3-1-8b-instruct) as a
+# generic vLLM+ZenDNN runtime, rather than the Layer-2 base
+# (docker.io/silogenai/aim-epyc-base) it was itself built FROM: that Layer-2
+# repo turned out to require Docker Hub auth we don't have (confirmed via
+# `docker pull` -- "pull access denied, repository does not exist or may
+# require authorization"), i.e. it's a private CI-internal build input, not
+# a published artifact, unlike the Layer-3 image which pulled fine.
+#
+# The Layer-3 image bakes in AIM_ID=meta-llama/Llama-3.1-8B-Instruct and
+# AIM_ALLOW_GENERAL_PROFILE_FALLBACK=false as plain image ENV, both
+# overridden below via ordinary pod env (env vars set on the container spec
+# always win over the image's own ENV defaults -- this isn't special-cased,
+# it's how `docker run -e` / Kubernetes env always behaves). Blanking
+# AIM_ID and setting AIM_MODEL_ID instead switches config.py onto its
+# "general" (non-model-specific) code path -- config.py:309 only raises on
+# aim_id *and* model_id both being truthy, and "" is falsy in Python, so
+# this is a clean override, not a hack around a broken check. That lets us
+# serve a small, ungated model (Qwen2.5-0.5B, below) instead of the baked
+# Llama-3.1-8B-Instruct, which is gated on HF and we have no HF_TOKEN
+# Secret in this cluster to satisfy that gate anyway.
+#
+# vLLM downloads the model itself at launch regardless of which model_id
+# ends up selected -- unlike llamacpp, its resolve_model_path needs no
+# pre-staging, so modelCacheInit stays off (chart default) and no PVC is
+# needed either.
+#
+# Usage:
+#   helm dependency build .
+#   helm template <release-name> . \
+#     -f values.yaml -f values.epyc-vllm.yaml \
+#     | kubectl apply -f - -n <namespace>
+llm:
+  replicas: 1
+  fullnameOverride: llm-vllm-smoketest
+
+  image: "docker.io/amdenterpriseai/aim-epyc-meta-llama-llama-3-1-8b-instruct:0.13.0"
+  imagePullPolicy: IfNotPresent
+
+  # No StorageClass on this cluster provides "mlstorage" (the chart's own
+  # default) — leaving it set would leave the PVC Pending forever and the
+  # pod stuck in ContainerCreating. We don't need persistence here anyway
+  # (model isn't cached under /workload — see AIM_CACHE_PATH note below),
+  # so force the emptyDir fallback (aimchart-llm.container.volumes) instead
+  # of chasing a real StorageClass like the llamacpp overlay did.
+  storage:
+    ephemeral:
+      storageClassName: ""
+
+  gpus: 0
+  # 8 cores/8GB to match the llamacpp pinning experiment's per-instance
+  # footprint exactly, so the two engines' pinning tests are apples-to-apples.
+  cpus: 8
+  memory: 8
+
+  env_vars:
+    # Blanks the image-baked AIM_ID (see header comment) so config.py takes
+    # the general/non-model-specific path keyed off AIM_MODEL_ID instead.
+    AIM_ID: ""
+    # General (non-model-specific) path: this alone selects the model.
+    # vLLM downloads it straight from the HF Hub into its own default cache
+    # dir (DEFAULT_CACHE_PATH, inside the container's writable layer) at
+    # launch — no init container, no PVC. Ungated, unlike the image's own
+    # baked Llama-3.1-8B-Instruct, so no HF_TOKEN is needed.
+    AIM_MODEL_ID: "Qwen/Qwen2.5-0.5B-Instruct"
+    # Overrides the image's baked AIM_ALLOW_GENERAL_PROFILE_FALLBACK=false
+    # (see header comment) so the general-path profile below isn't marked
+    # manual_selection_only and excluded.
+    AIM_ALLOW_GENERAL_PROFILE_FALLBACK: "true"
+    AIM_PRECISION: "bf16"
+    AIM_ALLOW_UNOPTIMIZED: "true"
+    # Every shipped general vLLM profile (assets/epyc/base/profiles/general/
+    # vllm-epyc_*.yaml) declares a concrete silicon accelerator_model
+    # (EPYC_ZEN5/EPYC_9965/EPYC_ZEN4). This box's cpu_detector falls back to
+    # a generic "CPU" model (its part number isn't in the recognized-silicon
+    # table — confirmed empirically during the llamacpp experiment), so all
+    # of those mismatch and startup fails with "No compatible profile
+    # found" unless a profile with accelerator_model: CPU is supplied.
+    # customProfiles (below) does exactly that, same mechanism the llamacpp
+    # overlay used (configmap.yml -> /workspace/aim-runtime/profiles/custom,
+    # first in profile_selector's search precedence). Confirmed empirically
+    # that profiles under .../profiles/custom are NOT treated as "general"
+    # by ProfileHandling (that's purely path-based -- only .../general/ is),
+    # so aim_id/model_id are mandatory fields here even though the shipped
+    # .../profiles/general/*.yaml files omit them; aim_id: "" matches our
+    # blanked AIM_ID above (Profile.matches_aim_id is a plain ==).
+    #
+    # Threads/KV-cache sized down from the shipped general profile's
+    # defaults (OMP_NUM_THREADS=128, VLLM_CPU_KVCACHE_SPACE=80 -- sized for
+    # a 124-core/single-instance reservation) to match this 8-core, tiny-
+    # model instance: oversubscribing OMP threads past the taskset mask
+    # just causes context-switching overhead, and an 80GB KV cache pool
+    # would be needlessly slow to pre-allocate x10 once we scale to 10
+    # instances.
+    OMP_NUM_THREADS: "8"
+    # "auto" makes vLLM's CPU backend bind its OpenMP threads to whatever
+    # CPUs are in the process's *current* sched_setaffinity mask -- i.e. it
+    # reads back exactly the restriction `taskset` already applied, rather
+    # than the container's nominal CPU count. This is what should make
+    # taskset and vLLM's own CPU-affinity logic compose instead of fight.
+    VLLM_CPU_OMP_THREADS_BIND: "auto"
+    VLLM_CPU_KVCACHE_SPACE: "4"
+
+  customProfiles:
+    vllm-cpu-bf16-tp1-latency.yaml:
+      aim_id: ""
+      model_id: "Qwen/Qwen2.5-0.5B-Instruct"
+      metadata:
+        engine: vllm
+        accelerator_type: cpu
+        accelerator_model: CPU
+        accelerator_count: 8
+        precision: bf16
+        metric: latency
+        manual_selection_only: false
+        type: general
+      engine_args:
+        dtype: bfloat16
+        # Small context on a tiny model -- keeps KV-cache allocation and
+        # startup fast; this is a pinning smoke test, not a throughput
+        # benchmark.
+        max-model-len: 4096
+      env_vars: {}

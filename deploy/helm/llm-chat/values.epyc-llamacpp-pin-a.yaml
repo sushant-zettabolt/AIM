@@ -1,0 +1,33 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# NUMA/SMT-aware core-pinning experiment, instance A. Layers on top of
+# values.yaml + values.epyc-llamacpp.yaml:
+#   helm template llm-pinned-a . -f values.yaml -f values.epyc-llamacpp.yaml \
+#     -f values.epyc-llamacpp-pin-a.yaml | kubectl apply -f - -n aim-demo-standalone
+#
+# This box (confirmed via `numactl --hardware` / `lscpu -e`) is 2 sockets = 2
+# NUMA nodes, 96 physical cores + SMT2 each: node 0 is logical CPUs 0-95
+# (SMT thread 0) plus 192-287 (thread 1, the SMT sibling of 0-95); node 1
+# mirrors this at 96-191 / 288-383. Pinning to 0-7 gives 8 whole physical
+# cores, all on node 0, thread-0-only -- no SMT sibling contention (192-199
+# stay unused by this pod), and any memory this process touches after
+# affinity is set defaults to node-0-local allocation (Linux's default
+# first-touch NUMA policy), no explicit --membind needed given how much
+# free memory node 0 has for this tiny model.
+#
+# Deliberately a separate release (own fullnameOverride, own Service, own
+# PVC) rather than a 3rd replica of llm-smoketest -- a single Deployment
+# can't give different replicas different `command:` overrides, since all
+# replicas are stamped from the one pod template.
+llm:
+  replicas: 1
+  fullnameOverride: llm-pinned-a
+  cpuAffinity: "0-7"
+  metadata:
+    labels:
+      # Shared across both pin-a/pin-b overlays so a hand-written Service
+      # (deploy/epyc-kubeadm/) could select across both if we later want to
+      # re-run the LB experiments against the pinned pair specifically.
+      pin-group: "llm-pinned"
