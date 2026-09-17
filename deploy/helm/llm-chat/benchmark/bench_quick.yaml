@@ -1,0 +1,44 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+#
+# A few minutes per target: checks the harness end to end (every code path,
+# every measurement check) before committing to bench_config.yaml's full run.
+# Sample sizes here are deliberately too small for p95/p99.
+#
+#   python3 bench.py run -c bench_quick.yaml
+
+client:
+  cpu_affinity: "176-191"
+  request_timeout_s: 600
+
+targets:
+  - name: vllm-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-vllm-96c-llama31-8b}
+  - name: llamacpp-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-llamacpp-96c-llama31-8b}
+
+defaults:
+  input_tokens: 512
+  output_tokens: 64
+  warmup_requests: 1
+
+scenarios:
+  - name: concurrency
+    mode: closed_loop
+    users: [1, 4]
+    num_requests: 8
+    duration_s: 300
+  - name: prefix_cache
+    mode: closed_loop
+    users: 2
+    input_tokens: 2048
+    output_tokens: 16
+    shared_prefix_tokens: 1792
+    cache_hit_rate: 0.5
+    num_requests: 8
+    duration_s: 300
+  - name: poisson
+    mode: open_loop
+    request_rate: 0.5
+    num_requests: 6

@@ -1,0 +1,32 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+#
+# Dedicated open-loop benchmark client. Reuses the AIM engine image because
+# it already ships `vllm` (and the `vllm bench serve` CLI) -- no separate
+# install needed. `command: sleep infinity` overrides the image's normal
+# entrypoint so it never starts its own server or downloads a model; it only
+# exists to be `kubectl exec`'d into by run_vllm_bench.sh.
+#
+# Deliberately carries none of the `app: llm-vllm-pinned10*` labels the
+# Service selects on, so it can never accidentally become an LB backend.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-bench-client
+  namespace: aim-demo-standalone
+  labels:
+    role: benchmark-client
+spec:
+  restartPolicy: Never
+  containers:
+    - name: bench
+      image: docker.io/amdenterpriseai/aim-epyc-meta-llama-llama-3-1-8b-instruct:0.13.0
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: "8"
+          memory: "2Gi"
+        limits:
+          cpu: "16"
+          memory: "4Gi"

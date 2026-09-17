@@ -1,0 +1,113 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Single-instance llama.cpp serving the REAL target model at REAL precision
+# -- meta-llama/Llama-3.1-8B-Instruct, bf16 GGUF -- pinned to all 96
+# physical cores of NUMA node 0 (thread-0-only, cores 0-95 -- see
+# values.epyc-llamacpp-10instances.yaml's topology writeup), for a serious
+# head-to-head vs. values.epyc-vllm-96core-llama31-8b.yaml under
+# benchmark/. Layered on top of values.yaml + values.epyc-llamacpp.yaml:
+#
+#   helm template llm-llamacpp-96c . -f values.yaml -f values.epyc-llamacpp.yaml \
+#     -f values.epyc-llamacpp-96core-llama31-8b.yaml | kubectl apply -f - -n aim-demo-standalone
+#
+# Uses bullerwins/Meta-Llama-3.1-8B-Instruct-GGUF's bf16 file -- a genuine,
+# unquantized bf16 GGUF (16,068,891,584 bytes, matches 8B params * 2
+# bytes -- confirmed via a live HEAD request), not a re-quantized
+# derivative. Ungated (unlike meta-llama/Llama-3.1-8B-Instruct itself), so
+# no HF_TOKEN Secret is needed.
+#
+# modelCacheInit is turned back OFF here (values.epyc-llamacpp.yaml turns it
+# on) -- the chart's init container always runs a plain
+# `./entrypoint.py download-to-cache`, which resolves to a bare
+# huggingface_hub.snapshot_download(allow_patterns=None) of the WHOLE repo
+# (model_storage.py's HuggingFaceStorageBackend.download) with no way to
+# pass gguf_filename through. Every real multi-quant Llama-3.1-8B-Instruct
+# GGUF repo checked (bartowski/, bullerwins/, legraphista/,
+# MaziyarPanahi/...) ships many sibling .gguf files (their combined size is
+# many times the one 16GB file we actually want) -- snapshot_download would
+# happily pull all of them. Pre-stage the single file manually instead (see
+# benchmark/README.md's "single-file GGUF pre-staging" section) into this
+# release's PVC (<fullname>-model-cache, still created --
+# storage.ephemeral.storageClassName alone gates that, independent of
+# modelCacheInit -- see aimchart-llm/templates/pvc.yaml) before the main
+# container's first successful start; the main container's own
+# LlamaCppEngine.resolve_model_path only ever reads from that PVC, never
+# downloads anything itself.
+llm:
+  fullnameOverride: llm-llamacpp-96c-llama31-8b
+  cpuAffinity: "0-95"
+  replicas: 1
+  modelCacheInit:
+    enabled: false
+  cpus: 96
+  memory: 64
+  storage:
+    ephemeral:
+      storageClassName: local-path
+      quantity: 64Gi
+  env_vars:
+    # Same shared-volume/cache-path convention as values.epyc-llamacpp.yaml
+    # -- see that file's AIM_CACHE_PATH comment.
+    AIM_CACHE_PATH: "/workload/model-cache"
+    AIM_PRECISION: "bf16"
+    # Required regardless of profile content -- see
+    # values.epyc-llamacpp.yaml's AIM_ENGINE comment (AIM_ENGINE defaults to
+    # "vllm" independently of any profile's own metadata.engine field).
+    AIM_ENGINE: "llamacpp"
+    # Blanks whatever AIM_ID this image bakes by default (the tiny-Qwen
+    # smoketest profile's aim_id) so config.py takes the
+    # general/non-model-specific path keyed off AIM_MODEL_ID instead --
+    # same mechanism as values.epyc-vllm.yaml's AIM_ID/AIM_MODEL_ID pair.
+    AIM_ID: ""
+    AIM_MODEL_ID: "bullerwins/Meta-Llama-3.1-8B-Instruct-GGUF"
+    AIM_ALLOW_GENERAL_PROFILE_FALLBACK: "true"
+    AIM_ALLOW_UNOPTIMIZED: "true"
+    # env_vars deep-merges across values files (mergeOverwrite in
+    # aimchart-llm's _main.tpl) -- without this, values.epyc-llamacpp.yaml's
+    # own AIM_ENGINE_ARGS ({"ctx-size": 20000, "threads": 8}, sized for its
+    # 8-core/Qwen-0.5B smoke test) would survive into this overlay
+    # unchanged and silently clobber this profile's ctx-size/threads/
+    # parallel at runtime -- AIM_ENGINE_ARGS is documented
+    # (command_generator.py) to merge on top of whichever profile actually
+    # gets selected, unconditionally. Confirmed present in `helm template`
+    # output before this line was added. Empty object = no-op override, so
+    # the customProfiles engine_args below are what actually takes effect.
+    AIM_ENGINE_ARGS: "{}"
+  metadata:
+    labels:
+      bench-group: "single-instance-96c-llama31-8b"
+  customProfiles:
+    llamacpp-cpu-bf16-tp1-latency.yaml:
+      aim_id: ""
+      model_id: "bullerwins/Meta-Llama-3.1-8B-Instruct-GGUF"
+      metadata:
+        engine: llamacpp
+        accelerator_type: cpu
+        # Generic "CPU", NOT a concrete silicon name -- matches this box's
+        # own cpu_detector fallback (its part number isn't in the
+        # recognized-silicon table, confirmed in values.epyc-vllm.yaml's
+        # comment). A concrete accelerator_model here (e.g. EPYC_ZEN5, as
+        # the original values.epyc-llamacpp-pin-a/b.yaml customProfiles
+        # used) mismatches and gets silently excluded -- confirmed that
+        # exact failure mode in that earlier experiment.
+        accelerator_model: CPU
+        accelerator_count: 96
+        precision: bf16
+        variant: bf16
+        metric: latency
+        manual_selection_only: false
+        type: general
+      engine_args:
+        gguf_filename: "Meta-Llama-3.1-8B-Instruct-bf16.gguf"
+        host: "0.0.0.0"
+        # kv_unified: this ctx-size is a single pool shared across all
+        # `parallel` slots (see values.epyc-llamacpp.yaml's ctx-size
+        # comment for the empirical confirmation) -- sized for 4 concurrent
+        # full-8192-token sequences, matching vLLM's --max-model-len 8192
+        # in the vllm overlay.
+        ctx-size: 32768
+        parallel: 4
+        threads: 96
+      env_vars: {}

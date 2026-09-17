@@ -25,3 +25,11 @@
 .idea/
 *.tmproj
 .vscode/
+
+# Benchmark harness (deploy/helm/llm-chat/benchmark/) -- test tooling that
+# lives next to the chart, not chart content. Helm's chart loader walks
+# every file under the chart dir and refuses any over 5MB, following
+# symlinks as it goes, so benchmark run output (results/) or a Python venv
+# left in this directory breaks `helm template`/`install` outright until
+# it's ignored here.
+benchmark/

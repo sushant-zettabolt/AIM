@@ -1,0 +1,78 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Single-instance vLLM serving the REAL target model at REAL precision --
+# meta-llama/Llama-3.1-8B-Instruct, bf16 -- pinned to all 96 physical cores
+# of NUMA node 0 (thread-0-only, cores 0-95), for a serious head-to-head vs.
+# values.epyc-llamacpp-96core-llama31-8b.yaml under benchmark/. Layered on
+# top of values.yaml + values.epyc-vllm.yaml:
+#
+#   helm template llm-vllm-96c . -f values.yaml -f values.epyc-vllm.yaml \
+#     -f values.epyc-vllm-96core-llama31-8b.yaml | kubectl apply -f - -n aim-demo-standalone
+#
+# Uses unsloth/Meta-Llama-3.1-8B-Instruct instead of the image's own baked
+# meta-llama/Llama-3.1-8B-Instruct (see values.epyc-vllm.yaml's header
+# comment on why AIM_ID/AIM_MODEL_ID get overridden at all) -- an ungated
+# bf16-safetensors mirror of the identical official weights, confirmed
+# via a live HF API check (gated: False, plain 4-shard .safetensors, no
+# quantization config). Avoids needing an HF_TOKEN Secret (none exists in
+# this cluster) to satisfy meta-llama/Llama-3.1-8B-Instruct's manual gate.
+#
+# Unlike the llamacpp overlay, no PVC/pre-staging dance is needed here --
+# vLLM's own resolve_model_path downloads straight from the HF Hub via
+# huggingface_hub itself at launch (see values.epyc-vllm.yaml's header
+# comment), and a plain safetensors repo has no multi-quant-sibling-bloat
+# problem the way GGUF quant repos do.
+llm:
+  fullnameOverride: llm-vllm-96c-llama31-8b
+  cpuAffinity: "0-95"
+  replicas: 1
+  cpus: 96
+  memory: 64
+  storage:
+    ephemeral:
+      storageClassName: ""
+
+  env_vars:
+    AIM_ID: ""
+    AIM_MODEL_ID: "unsloth/Meta-Llama-3.1-8B-Instruct"
+    AIM_ALLOW_GENERAL_PROFILE_FALLBACK: "true"
+    AIM_PRECISION: "bf16"
+    AIM_ALLOW_UNOPTIMIZED: "true"
+    OMP_NUM_THREADS: "96"
+    VLLM_CPU_OMP_THREADS_BIND: "auto"
+    # taskset only sets CPU affinity, never NUMA memory-node affinity (see
+    # values.epyc-vllm-10instances.yaml's full writeup) -- this is node 0's
+    # counterpart to that file's CPU_VISIBLE_MEMORY_NODES: "1".
+    CPU_VISIBLE_MEMORY_NODES: "0"
+    # ~128KB of KV cache per token for Llama-3.1-8B (32 layers, 8 KV heads,
+    # head_dim 128, bf16: 2 * 8 * 128 * 2 bytes * 32 layers) -- 24GB covers
+    # several concurrent full-8192-token sequences plus headroom, well
+    # inside this box's 1.5TiB RAM.
+    VLLM_CPU_KVCACHE_SPACE: "24"
+
+  metadata:
+    labels:
+      bench-group: "single-instance-96c-llama31-8b"
+
+  customProfiles:
+    vllm-cpu-bf16-tp1-latency.yaml:
+      aim_id: ""
+      model_id: "unsloth/Meta-Llama-3.1-8B-Instruct"
+      metadata:
+        engine: vllm
+        accelerator_type: cpu
+        accelerator_model: CPU
+        accelerator_count: 96
+        precision: bf16
+        metric: latency
+        manual_selection_only: false
+        type: general
+      engine_args:
+        dtype: bfloat16
+        # Matches llama.cpp overlay's ctx-size 32768 / parallel 4 (i.e. 4 x
+        # 8192) -- same max single-sequence length on both engines for a
+        # fair comparison.
+        max-model-len: 8192
+      env_vars: {}

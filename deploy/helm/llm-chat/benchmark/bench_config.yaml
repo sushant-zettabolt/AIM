@@ -1,0 +1,92 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+#
+# Benchmark definition for bench.py. Edit this file, then:
+#
+#   python3 bench.py run -c bench_config.yaml
+#   python3 bench.py run -c bench_config.yaml --targets vllm-96c --scenarios concurrency
+#   python3 bench.py run -c bench_config.yaml --dry-run      # list the runs without sending anything
+#
+# Targets that aren't reachable are skipped (and listed in the report), so it's
+# fine to keep both engines here and bring up one at a time -- they're pinned
+# to the same 96 cores and must not run together. Then merge the two run
+# directories into one head-to-head report:
+#
+#   python3 bench.py compare results/<vllm-run> results/<llamacpp-run> -o compare.md
+#
+# Any scenario parameter marked (sweep) accepts a list; every combination
+# becomes its own run.
+
+client:
+  # Load generator CPUs (os.sched_setaffinity). Must not overlap the cores
+  # the engine under test is pinned to: 0-95 for the 96-core single-instance
+  # engines; 96-175 hold the 10-instance Qwen deployment. 176-191 are free.
+  cpu_affinity: "176-191"
+  request_timeout_s: 900
+
+targets:
+  - name: vllm-96c
+    # Resolves the Service's ClusterIP, and the pod IPs behind it for
+    # per-pod /metrics scraping. Alternatively set base_url (and optionally
+    # metrics_urls) directly, e.g. an Ingress with headers: {Host: llm.local}.
+    kubernetes: {namespace: aim-demo-standalone, service: llm-vllm-96c-llama31-8b}
+    model: auto      # first id from /v1/models
+    engine: auto     # from /v1/models owned_by
+  - name: llamacpp-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-llamacpp-96c-llama31-8b}
+    model: auto
+    engine: auto
+
+# Applied to every scenario unless the scenario overrides it.
+defaults:
+  input_tokens: 1024          # (sweep) exact prompt length incl. chat template
+  output_tokens: 128          # (sweep) max_tokens
+  ignore_eos: true            # force exactly output_tokens so engines do identical work
+  temperature: 0.0
+  shared_prefix_tokens: 0     # (sweep) tokens of the prompt shared across requests
+  cache_hit_rate: 0.0         # (sweep) fraction of requests that reuse the shared prefix
+  warmup_requests: 2          # per run, excluded from results
+  seed: 42
+
+scenarios:
+  # Classic concurrency sweep: N users each send the next request as soon as
+  # the previous one finishes. num_requests bounds the sample size so every
+  # point has enough samples for p90/p95 (p99 needs >= 100).
+  - name: concurrency
+    mode: closed_loop
+    users: [1, 2, 4, 8, 16]   # (sweep)
+    num_requests: 32          # (sweep) stop after this many requests...
+    duration_s: 300           # (sweep) ...or this many seconds, whichever first
+    think_time_s: [0, 0]      # uniform [min, max] pause between a user's requests
+    ramp_up_s: 0              # (sweep) spread user start times over this window
+
+  # Prompt-length sensitivity: prefill-heavy vs decode-heavy.
+  - name: prompt_length
+    mode: closed_loop
+    users: 4
+    input_tokens: [256, 2048, 4096]
+    output_tokens: 128
+    num_requests: 20
+    duration_s: 300
+
+  # Prefix-cache benefit: identical prompt size, 3584 of 4096 tokens shared
+  # by "hit" requests, fully unique for "miss" requests.
+  - name: prefix_cache
+    mode: closed_loop
+    users: 4
+    input_tokens: 4096
+    output_tokens: 64
+    shared_prefix_tokens: 3584
+    cache_hit_rate: [0.0, 1.0]
+    num_requests: 20
+    duration_s: 300
+
+  # Open loop: requests arrive on a Poisson schedule whether or not the
+  # server keeps up, so queueing shows up in TTFT.
+  - name: poisson
+    mode: open_loop
+    request_rate: 0.2         # (sweep) requests/s; "inf" = all at once
+    burstiness: 1.0           # (sweep) 1 = Poisson, <1 burstier, >1 more even
+    num_requests: 24
+    max_concurrency: null     # (sweep) optional client-side cap

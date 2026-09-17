@@ -1,0 +1,33 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+#
+# Same workload as the run_vllm_bench.sh cross-check in README.md, so
+# bench.py's numbers can be compared with upstream `vllm bench serve`:
+# 24 requests, all queued at once, at most 4 in flight, 128 output tokens.
+# input_tokens is 546 because `vllm bench serve --random-input-len 512`
+# sends 512 random tokens plus ~34 tokens of chat template.
+#
+#   python3 bench.py run -c bench_crosscheck.yaml --targets vllm-96c
+
+client:
+  cpu_affinity: "176-191"
+  request_timeout_s: 600
+
+targets:
+  - name: vllm-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-vllm-96c-llama31-8b}
+  - name: llamacpp-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-llamacpp-96c-llama31-8b}
+
+defaults:
+  input_tokens: 546
+  output_tokens: 128
+  warmup_requests: 2
+
+scenarios:
+  - name: crosscheck
+    mode: open_loop
+    request_rate: inf
+    num_requests: 24
+    max_concurrency: 4

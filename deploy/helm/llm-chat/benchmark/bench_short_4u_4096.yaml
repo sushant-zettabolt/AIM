@@ -1,0 +1,36 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+#
+# Short head-to-head: 4 concurrent users, ~4096-token prompts, on both
+# engines. Both are pinned to the same 96 cores, so they can't be up at the
+# same time -- run one, swap the deployment, run the other, then merge:
+#
+#   python3 bench.py run -c bench_short_4u_4096.yaml --targets llamacpp-96c
+#   python3 bench.py run -c bench_short_4u_4096.yaml --targets vllm-96c
+#   python3 bench.py compare results/<llamacpp-run> results/<vllm-run> -o compare.md
+#
+# 20 requests keeps it to a couple of minutes per engine while still giving
+# enough samples for a meaningful p90/p95 (p99 would need >= 100).
+
+client:
+  cpu_affinity: "176-191"
+  request_timeout_s: 600
+
+targets:
+  - name: llamacpp-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-llamacpp-96c-llama31-8b}
+  - name: vllm-96c
+    kubernetes: {namespace: aim-demo-standalone, service: llm-vllm-96c-llama31-8b}
+
+defaults:
+  input_tokens: 4096
+  output_tokens: 128
+  warmup_requests: 1
+
+scenarios:
+  - name: users4_in4096
+    mode: closed_loop
+    users: 4
+    num_requests: 20
+    duration_s: 420
